@@ -1,0 +1,126 @@
+version: "3"
+
+services:
+  zookeeper:
+    image: bitnami/zookeeper:3.9.1
+    container_name: signoz-zookeeper
+    hostname: zookeeper
+    user: root
+    ports:
+      - "2181:2181"
+      - "2888:2888"
+      - "3888:3888"
+    volumes:
+      - ./data/zookeeper:/bitnami/zookeeper
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    networks:
+      - signoz-network
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.1.2-alpine
+    container_name: signoz-clickhouse
+    hostname: clickhouse
+    ports:
+      - "9000:9000"
+      - "8123:8123"
+      - "9181:9181"
+    volumes:
+      - ./data/clickhouse/:/var/lib/clickhouse/
+      - ./clickhouse-config.xml:/etc/clickhouse-server/config.d/custom-config.xml
+      - ./clickhouse-users.xml:/etc/clickhouse-server/users.d/custom-users.xml
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "localhost:8123/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      - zookeeper
+    networks:
+      - signoz-network
+
+  query-service:
+    image: signoz/query-service:0.39.0
+    container_name: signoz-query-service
+    hostname: query-service
+    ports:
+      - "8080:8080"
+    environment:
+      - STORAGE=clickhouse
+      - ClickHouseUrl=tcp://clickhouse:9000
+      - ALERTMANAGER_API_URL=http://alertmanager:9093
+      - GIGABYTES_OF_SAMPLE_APP_DATA=0 # Avoid sample data
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      zookeeper:
+        condition: service_started
+    networks:
+      - signoz-network
+
+  frontend:
+    image: signoz/frontend:0.39.0
+    container_name: signoz-frontend
+    hostname: frontend
+    ports:
+      - "3301:3301"
+    environment:
+      - FRONTEND_API_ENDPOINT=http://localhost:8080
+    depends_on:
+      - query-service
+    networks:
+      - signoz-network
+
+  alertmanager:
+    image: signoz/alertmanager:0.23.4
+    container_name: signoz-alertmanager
+    hostname: alertmanager
+    volumes:
+      - ./alertmanager-config.yaml:/signoz/alertmanager-config.yaml
+      - ./data/alertmanager:/data
+    command:
+      - --config.file=/signoz/alertmanager-config.yaml
+      - --storage.path=/data
+    networks:
+      - signoz-network
+
+  # --- SigNoz OTel Collector (The Backend Collector) ---
+  signoz-otel-collector:
+    image: signoz/signoz-otel-collector:0.88.10
+    container_name: signoz-otel-collector
+    hostname: signoz-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./signoz-otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - signoz-network
+      # Host network mode is NOT typically used for the backend collector unless intended.
+      # Usually host network is for the *agent* collector.
+      # But to allow the host-metrics-collector (running in host mode) to talk to it easily via localhost:4317,
+      # exposing ports 4317:4317 binds to host interfaces.
+
+  # --- Host Metrics OTel Collector (The Agent) ---
+  host-metrics-collector:
+    image: signoz/signoz-otel-collector:0.88.10
+    container_name: host-metrics-collector
+    command: ["--config=/etc/host-metrics-otel-config.yaml"]
+    volumes:
+      - ./host-metrics-otel-config.yaml:/etc/host-metrics-otel-config.yaml
+      - /:/hostfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    privileged: true
+    pid: host
+    network_mode: host
+    restart: on-failure
+    depends_on:
+      - signoz-otel-collector
+
+networks:
+  signoz-network:
+    driver: bridge
