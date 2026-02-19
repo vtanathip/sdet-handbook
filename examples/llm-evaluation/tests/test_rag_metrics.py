@@ -13,6 +13,8 @@ from deepeval import assert_test
 from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric
 from deepeval.test_case import LLMTestCase
 
+from llm_evaluation.custom_models import OllamaModel
+
 
 class TestAnswerRelevancy:
     """Test suite for Answer Relevancy metric.
@@ -21,15 +23,16 @@ class TestAnswerRelevancy:
     It's useful for ensuring your RAG system actually answers what was asked.
     """
 
-    def test_relevant_answer(self, rag_test_case: LLMTestCase):
+    def test_relevant_answer(self, rag_test_case: LLMTestCase, ollama_model: OllamaModel):
         """Test that a relevant answer passes the threshold."""
         answer_relevancy = AnswerRelevancyMetric(
             threshold=0.7,
             include_reason=True,  # Get explanation for the score
+            model=ollama_model,
         )
         assert_test(rag_test_case, [answer_relevancy])
 
-    def test_highly_relevant_answer(self):
+    def test_highly_relevant_answer(self, ollama_model: OllamaModel):
         """Test a highly relevant, direct answer."""
         test_case = LLMTestCase(
             input="What time does the store close?",
@@ -39,10 +42,11 @@ class TestAnswerRelevancy:
             ],
         )
 
-        answer_relevancy = AnswerRelevancyMetric(threshold=0.8)
+        answer_relevancy = AnswerRelevancyMetric(
+            threshold=0.8, model=ollama_model)
         assert_test(test_case, [answer_relevancy])
 
-    def test_partially_relevant_answer(self):
+    def test_partially_relevant_answer(self, ollama_model: OllamaModel):
         """Test an answer that's related but not fully on topic."""
         test_case = LLMTestCase(
             input="What is the price of the premium plan?",
@@ -53,7 +57,8 @@ class TestAnswerRelevancy:
         )
 
         # Lower threshold since the answer doesn't mention the price directly
-        answer_relevancy = AnswerRelevancyMetric(threshold=0.5)
+        answer_relevancy = AnswerRelevancyMetric(
+            threshold=0.5, model=ollama_model)
         assert_test(test_case, [answer_relevancy])
 
 
@@ -64,15 +69,16 @@ class TestFaithfulness:
     the retrieval context. It helps detect hallucinations in RAG systems.
     """
 
-    def test_faithful_response(self, rag_test_case: LLMTestCase):
+    def test_faithful_response(self, rag_test_case: LLMTestCase, ollama_model: OllamaModel):
         """Test that a faithful response passes the threshold."""
         faithfulness = FaithfulnessMetric(
             threshold=0.7,
             include_reason=True,
+            model=ollama_model,
         )
         assert_test(rag_test_case, [faithfulness])
 
-    def test_grounded_response(self):
+    def test_grounded_response(self, ollama_model: OllamaModel):
         """Test a response fully grounded in context."""
         test_case = LLMTestCase(
             input="What are the system requirements?",
@@ -82,10 +88,10 @@ class TestFaithfulness:
             ],
         )
 
-        faithfulness = FaithfulnessMetric(threshold=0.8)
+        faithfulness = FaithfulnessMetric(threshold=0.8, model=ollama_model)
         assert_test(test_case, [faithfulness])
 
-    def test_unfaithful_response_detection(self):
+    def test_unfaithful_response_detection(self, ollama_model: OllamaModel):
         """Demonstrate detection of unfaithful (hallucinated) content."""
         test_case = LLMTestCase(
             input="What warranty do you offer?",
@@ -95,7 +101,7 @@ class TestFaithfulness:
             ],
         )
 
-        faithfulness = FaithfulnessMetric(threshold=0.7)
+        faithfulness = FaithfulnessMetric(threshold=0.7, model=ollama_model)
 
         # Measure without asserting - this should have a low score
         faithfulness.measure(test_case)
@@ -109,21 +115,21 @@ class TestFaithfulness:
 class TestMultipleRAGMetrics:
     """Test combining multiple RAG metrics for comprehensive evaluation."""
 
-    def test_combined_rag_evaluation(self, rag_test_case: LLMTestCase):
+    def test_combined_rag_evaluation(self, rag_test_case: LLMTestCase, ollama_model: OllamaModel):
         """Run multiple RAG metrics together."""
         metrics = [
-            AnswerRelevancyMetric(threshold=0.6),
-            FaithfulnessMetric(threshold=0.6),
+            AnswerRelevancyMetric(threshold=0.6, model=ollama_model),
+            FaithfulnessMetric(threshold=0.6, model=ollama_model),
         ]
         assert_test(rag_test_case, metrics)
 
     @pytest.mark.parametrize("case_index", [0, 1, 2])
-    def test_rag_metrics_batch(self, rag_test_cases: list[LLMTestCase], case_index: int):
+    def test_rag_metrics_batch(self, rag_test_cases: list[LLMTestCase], case_index: int, ollama_model: OllamaModel):
         """Parametrized test for batch RAG evaluation."""
         test_case = rag_test_cases[case_index]
 
         metrics = [
-            AnswerRelevancyMetric(threshold=0.5),
-            FaithfulnessMetric(threshold=0.5),
+            AnswerRelevancyMetric(threshold=0.5, model=ollama_model),
+            FaithfulnessMetric(threshold=0.5, model=ollama_model),
         ]
         assert_test(test_case, metrics)

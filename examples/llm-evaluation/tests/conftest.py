@@ -4,6 +4,13 @@ import pytest
 from deepeval.test_case import LLMTestCase
 
 from llm_evaluation.sample_data import SAMPLE_RAG_CASES, SAMPLE_QUALITY_CASES
+from llm_evaluation.custom_models import OllamaModel
+
+
+@pytest.fixture(scope="session")
+def ollama_model() -> OllamaModel:
+    """Ollama model fixture for all tests (uses local LLM)."""
+    return OllamaModel()
 
 
 @pytest.fixture

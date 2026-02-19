@@ -11,11 +11,13 @@ from deepeval import assert_test
 from deepeval.metrics import GEval
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 
+from llm_evaluation.custom_models import OllamaModel
+
 
 class TestGEvalCorrectness:
     """Test suite demonstrating G-Eval for correctness evaluation."""
 
-    def test_correctness_basic(self, simple_test_case: LLMTestCase):
+    def test_correctness_basic(self, simple_test_case: LLMTestCase, ollama_model: OllamaModel):
         """Evaluate if actual output is correct based on expected output."""
         correctness_metric = GEval(
             name="Correctness",
@@ -25,10 +27,11 @@ class TestGEvalCorrectness:
                 LLMTestCaseParams.EXPECTED_OUTPUT,
             ],
             threshold=0.5,
+            model=ollama_model,
         )
         assert_test(simple_test_case, [correctness_metric])
 
-    def test_correctness_with_input_context(self):
+    def test_correctness_with_input_context(self, ollama_model: OllamaModel):
         """Evaluate correctness considering the original question."""
         test_case = LLMTestCase(
             input="What programming language is best for beginners?",
@@ -49,6 +52,7 @@ class TestGEvalCorrectness:
                 LLMTestCaseParams.EXPECTED_OUTPUT,
             ],
             threshold=0.5,
+            model=ollama_model,
         )
         assert_test(test_case, [correctness_metric])
 
@@ -56,7 +60,7 @@ class TestGEvalCorrectness:
 class TestGEvalCustomCriteria:
     """Test suite demonstrating custom G-Eval criteria for various use cases."""
 
-    def test_helpfulness(self):
+    def test_helpfulness(self, ollama_model: OllamaModel):
         """Evaluate how helpful a response is."""
         test_case = LLMTestCase(
             input="How do I improve my code quality?",
@@ -79,10 +83,11 @@ class TestGEvalCustomCriteria:
                 LLMTestCaseParams.ACTUAL_OUTPUT,
             ],
             threshold=0.6,
+            model=ollama_model,
         )
         assert_test(test_case, [helpfulness_metric])
 
-    def test_clarity(self):
+    def test_clarity(self, ollama_model: OllamaModel):
         """Evaluate clarity and readability of response."""
         test_case = LLMTestCase(
             input="Explain what an API is.",
@@ -101,10 +106,11 @@ class TestGEvalCustomCriteria:
                 LLMTestCaseParams.ACTUAL_OUTPUT,
             ],
             threshold=0.7,
+            model=ollama_model,
         )
         assert_test(test_case, [clarity_metric])
 
-    def test_conciseness(self):
+    def test_conciseness(self, ollama_model: OllamaModel):
         """Evaluate if response is appropriately concise."""
         test_case = LLMTestCase(
             input="What is 2 + 2?",
@@ -122,6 +128,7 @@ class TestGEvalCustomCriteria:
                 LLMTestCaseParams.ACTUAL_OUTPUT,
             ],
             threshold=0.7,
+            model=ollama_model,
         )
         assert_test(test_case, [conciseness_metric])
 
@@ -129,7 +136,7 @@ class TestGEvalCustomCriteria:
 class TestGEvalWithContext:
     """Test G-Eval with retrieval context for RAG systems."""
 
-    def test_contextual_correctness(self, rag_test_case: LLMTestCase):
+    def test_contextual_correctness(self, rag_test_case: LLMTestCase, ollama_model: OllamaModel):
         """Evaluate if response correctly uses the provided context."""
         contextual_correctness = GEval(
             name="Contextual Correctness",
@@ -143,5 +150,6 @@ class TestGEvalWithContext:
                 LLMTestCaseParams.RETRIEVAL_CONTEXT,
             ],
             threshold=0.6,
+            model=ollama_model,
         )
         assert_test(rag_test_case, [contextual_correctness])

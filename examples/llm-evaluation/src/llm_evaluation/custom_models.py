@@ -79,10 +79,12 @@ class OllamaModel(DeepEvalBaseLLM):
         self,
         model_name: str | None = None,
         base_url: str | None = None,
+        enforce_json: bool = True,
     ):
         self.model_name = model_name or os.getenv("OLLAMA_MODEL", "llama3.2")
         self.base_url = base_url or os.getenv(
             "OLLAMA_BASE_URL", "http://localhost:11434")
+        self.enforce_json = enforce_json
 
     def load_model(self) -> Any:
         """Return model configuration (Ollama uses HTTP API)."""
@@ -92,17 +94,29 @@ class OllamaModel(DeepEvalBaseLLM):
         """Generate a response from Ollama."""
         import requests
 
+        payload = {
+            "model": self.model_name,
+            "prompt": prompt,
+            "stream": False,
+        }
+
+        # Enable JSON mode when the prompt expects JSON output
+        # This forces Ollama to generate valid JSON
+        if self.enforce_json and self._prompt_expects_json(prompt):
+            payload["format"] = "json"
+
         response = requests.post(
             f"{self.base_url}/api/generate",
-            json={
-                "model": self.model_name,
-                "prompt": prompt,
-                "stream": False,
-            },
+            json=payload,
             timeout=120,
         )
         response.raise_for_status()
         return response.json()["response"]
+
+    def _prompt_expects_json(self, prompt: str) -> bool:
+        """Check if the prompt expects JSON output."""
+        json_indicators = ["json", "JSON", "{", "schema", "format"]
+        return any(indicator in prompt for indicator in json_indicators)
 
     async def a_generate(self, prompt: str) -> str:
         """Async generate - falls back to sync for simplicity."""
