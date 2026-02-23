@@ -1,6 +1,7 @@
 receivers:
   hostmetrics:
-    collection_interval: 10s
+    collection_interval: 1s
+    root_path: /hostfs
     scrapers:
       cpu: {}
       memory: {}
@@ -10,6 +11,26 @@ receivers:
       load: {}
       paging: {}
       processes: {}
+      process:
+        include:
+          match_type: regexp
+          names: [".*"]
+        mute_process_name_error: true
+        mute_process_exe_error: true
+        mute_process_io_error: true
+        metrics:
+          process.cpu.time:
+            enabled: true
+          process.cpu.utilization:
+            enabled: true
+          process.memory.usage:
+            enabled: true
+          process.memory.virtual:
+            enabled: true
+          process.disk.io:
+            enabled: true
+          process.threads:
+            enabled: true
 
 processors:
   resourcedetection:
