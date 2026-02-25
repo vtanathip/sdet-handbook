@@ -1,0 +1,45 @@
+# Windows Exporter Configuration
+# Reference: https://github.com/prometheus-community/windows_exporter
+
+collectors:
+  enabled: cpu,cs,logical_disk,memory,net,os,process,system,tcp,thermalzone
+
+collector:
+  cpu:
+    enabled: true
+  cs:
+    enabled: true
+  logical_disk:
+    enabled: true
+    include: ".*"
+  memory:
+    enabled: true
+  net:
+    enabled: true
+    include: ".*"
+  os:
+    enabled: true
+  process:
+    enabled: true
+    include: ".*"
+  system:
+    enabled: true
+  tcp:
+    enabled: true
+  thermalzone:
+    enabled: true
+
+# Telemetry settings
+telemetry:
+  addr: ":9182"
+  path: "/metrics"
+  max-requests: 5
+
+# Scrape settings
+scrape:
+  timeout-margin: 0.5
+
+# Logging
+log:
+  level: info
+  format: logfmt

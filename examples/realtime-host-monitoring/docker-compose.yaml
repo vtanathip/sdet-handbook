@@ -21,6 +21,8 @@ services:
       - "8889:8889"
       - "4317:4317"
       - "4318:4318"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - monitoring-network
 
@@ -36,6 +38,8 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --web.enable-lifecycle
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - otel-collector
     networks:
@@ -53,6 +57,7 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_MIN_REFRESH_INTERVAL=1s
     depends_on:
       - prometheus
     networks:
