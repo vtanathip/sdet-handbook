@@ -1,0 +1,39 @@
+services:
+  # ── Phoenix – LLM observability UI & trace collector ────────────────────
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: phoenix
+    ports:
+      - "6006:6006" # Phoenix UI
+      - "4317:4317" # OTLP gRPC collector
+    volumes:
+      - phoenix-data:/data
+    environment:
+      - PHOENIX_WORKING_DIR=/data
+    networks:
+      - observability-network
+
+  # ── CLI Chatbot ─────────────────────────────────────────────────────────
+  chatbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chatbot
+    env_file:
+      - .env
+    depends_on:
+      - phoenix
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Interactive mode for CLI input
+    stdin_open: true
+    tty: true
+    networks:
+      - observability-network
+
+networks:
+  observability-network:
+    driver: bridge
+
+volumes:
+  phoenix-data:
