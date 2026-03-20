@@ -1,121 +1,89 @@
 # gitlab_bot Package Guide
 
-This folder contains the runtime engine for the GitLab scanning bot.
+This package is the bot runtime used by the container entrypoint. It polls GitLab projects, runs scanners, optionally applies safe fixes, and automates Merge Request updates.
 
-## What This Package Does
-
-- Polls configured GitLab projects on a fixed interval.
-- Detects new commits on the target branch.
-- Clones repository snapshots and runs scanners.
-- Applies safe auto-fixes when enabled.
-- Writes a machine report for human reviewers.
-- Pushes a bot branch and opens or updates a Merge Request.
-- Stores state to avoid duplicate MR noise.
-
-## Architecture Overview
+## Runtime Flow
 
 ```mermaid
-flowchart TD
-    A[main.run loop] --> B[Load Settings]
-    A --> C[Load StateStore]
-    A --> D[Create GitLab Client]
-    D --> E[Fetch Project Latest Commit]
-    E --> F{Commit Changed?}
-    F -- No --> A
-    F -- Yes --> G[Clone Project Worktree]
-    G --> H[run_dependency_scans]
-    G --> I[run_code_scans]
-    H --> J[ScanReport]
-    I --> J
-    J --> K[apply_auto_fixes]
-    K --> L[build_markdown_report]
-    L --> M[git add commit push]
-    M --> N[open_or_update_merge_request]
-    N --> O[Update StateStore]
-    O --> A
+graph TD
+    A[Start poll cycle] --> B[Load settings and state]
+    B --> C[Create GitLab client]
+    C --> D[Read latest target branch commit]
+    D --> E{Commit changed since last scan}
+    E -- No --> Z[Skip project]
+    E -- Yes --> F[Clone worktree]
+    F --> G[Run dependency scan]
+    F --> H[Run code scan]
+    G --> I[Build ScanReport]
+    H --> I
+    I --> J[Apply auto fixes if enabled]
+    J --> K[Write report to .bot-reports/scan-report.md]
+    K --> L{Findings or file changes exist}
+    L -- No --> M[Persist state only]
+    L -- Yes --> N{DRY_RUN enabled}
+    N -- Yes --> O[Do not push or create MR]
+    N -- No --> P[Commit and push bot branch]
+    P --> Q[Create or update MR]
+    Q --> M
+    M --> R[Continue next project]
+    Z --> R
 ```
 
-## Runtime Sequence
+## Why This Diagram Renders Reliably
 
-```mermaid
-sequenceDiagram
-    participant Loop as Bot Loop
-    participant API as GitLab API
-    participant Repo as Worktree Clone
-    participant Scan as Scanners/Fixers
-    participant MR as Merge Request
+- Uses `graph TD` syntax, which is broadly supported across GitHub and GitLab renderers.
+- Avoids advanced Mermaid directives and class styling.
+- Keeps node labels simple to reduce parser edge cases.
 
-    Loop->>API: Get project + latest commit
-    API-->>Loop: commit sha
-    Loop->>Loop: Compare with saved state
-    alt new commit
-        Loop->>Repo: git clone target branch
-        Loop->>Scan: dependency scan + code scan
-        Scan-->>Loop: findings and notes
-        Loop->>Scan: auto-fix (optional)
-        Loop->>Repo: write .bot-reports/scan-report.md
-        Loop->>Repo: commit and push bot branch
-        Loop->>MR: create or update MR
-        Loop->>Loop: persist commit + signature
-    else unchanged
-        Loop->>Loop: skip project
-    end
-```
+## Processing Steps
 
-## Folder Responsibilities
+1. Poll each configured project ID.
+2. Compare the latest commit SHA to saved state.
+3. Clone and scan only when the commit changed.
+4. Build a markdown report and include scanner notes.
+5. Push/update bot branch and MR only when needed.
+6. Persist state to prevent duplicate MR noise.
 
-- main.py: Poll loop, project processing orchestration, MR decision flow.
-- config.py: Environment-driven settings model.
-- models.py: Finding and ScanReport data structures.
-- scanners/dependency.py: pip-audit and outdated dependency checks.
-- scanners/code.py: bandit and ruff issue discovery.
-- fixers/auto_fix.py: Safe auto-remediation commands.
-- reporting/report_builder.py: Markdown report generation.
-- git_ops.py: Clone, branch, commit, push operations.
-- gitlab/client.py: Authenticated GitLab API client creation.
-- gitlab/mr_manager.py: Create or update merge requests.
-- state/store.py: Lightweight deduplication state persistence.
-- subprocess_utils.py: Shell command execution helper.
+## Package Layout
 
-## Decision Logic
-
-```mermaid
-flowchart LR
-    A[Scan Complete] --> B{Any findings or changed files?}
-    B -- No --> C[Save commit state and stop]
-    B -- Yes --> D{Changed files > max_files_changed?}
-    D -- Yes --> E[Skip MR and log warning]
-    D -- No --> F{Dry run enabled?}
-    F -- Yes --> G[Do not push or create MR]
-    F -- No --> H[Push branch and create or update MR]
-```
+- `main.py`: Poll loop and project processing orchestration.
+- `config.py`: Environment-driven settings model.
+- `models.py`: Finding and `ScanReport` data models.
+- `scanners/dependency.py`: `pip-audit` and outdated dependency checks.
+- `scanners/code.py`: `ruff` and `bandit` scan logic.
+- `fixers/auto_fix.py`: Safe remediation commands.
+- `reporting/report_builder.py`: Markdown report generation.
+- `git_ops.py`: Clone, branch, commit, and push operations.
+- `gitlab/client.py`: Authenticated GitLab API client setup.
+- `gitlab/mr_manager.py`: MR create/update operations.
+- `state/store.py`: Deduplication state persistence.
+- `subprocess_utils.py`: Command execution wrappers.
 
 ## Key Environment Inputs
 
-- GITLAB_URL: GitLab base URL reachable from bot container.
-- GITLAB_TOKEN: Personal access token with API and repo write scopes.
-- PROJECT_IDS: Comma-separated numeric project IDs.
-- TARGET_BRANCH: Branch to watch, default main.
-- POLL_INTERVAL_SECONDS: Sleep duration between cycles.
-- BOT_BRANCH_PREFIX: Prefix for bot-generated branches.
-- DRY_RUN: If true, scans and report still run but no push or MR.
+- `GITLAB_URL`: Base GitLab URL reachable from the bot container.
+- `GITLAB_TOKEN`: PAT with API and repository write access.
+- `PROJECT_IDS`: Comma-separated numeric project IDs.
+- `TARGET_BRANCH`: Branch to watch, default is `main`.
+- `POLL_INTERVAL_SECONDS`: Delay between polling cycles.
+- `BOT_BRANCH_PREFIX`: Prefix for generated bot branches.
+- `DRY_RUN`: If true, run scans and reporting without push/MR.
+- `STATE_FILE`: Persistent deduplication file path.
 
 ## Failure and Recovery Behavior
 
-- Per-project processing has retry with bounded attempts.
-- Exceptions in one project do not stop the full polling cycle.
-- State is persisted between cycles so restarts remain idempotent.
-- If scanners fail, notes are added to report and loop continues.
+- Project processing retries are bounded per cycle.
+- Failures for one project do not stop processing others.
+- Scanner failures are captured as report notes.
+- State persistence keeps behavior idempotent after restarts.
 
-## Typical Output in Target Repositories
+## Expected Output in Target Repositories
 
-- A bot branch named like bot/scan/abcd1234.
-- A markdown report file at .bot-reports/scan-report.md.
-- A merge request titled chore(bot): dependency and code scan remediation.
+- Branch similar to `bot/scan/<shortsha>`.
+- Report file at `.bot-reports/scan-report.md`.
+- Merge Request similar to `chore(bot): dependency and code scan remediation`.
 
-## Extension Ideas
+## Troubleshooting
 
-- Add webhook trigger mode in parallel with polling.
-- Add severity threshold gating before MR creation.
-- Add per-project policy file for fix strategy.
-- Add richer report sections with trend history.
+- If your markdown renderer does not support Mermaid, use the step list above as the canonical runtime reference.
+- If diagrams still fail to render, verify Mermaid support in your Git platform and markdown viewer settings.

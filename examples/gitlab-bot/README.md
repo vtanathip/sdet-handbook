@@ -2,6 +2,29 @@
 
 Containerized GitLab bot that periodically polls configured projects, scans dependencies and code quality/security, applies safe automated fixes, and opens a Merge Request for human review when issues are detected.
 
+## Architecture
+
+```mermaid
+graph TD
+  A[gitlab-bot container] --> B[Poll configured project IDs]
+  B --> C[Check latest commit on target branch]
+  C --> D{Commit changed}
+  D -- No --> E[Skip project]
+  D -- Yes --> F[Clone repository]
+  F --> G[Run dependency and code scanners]
+  G --> H[Optional auto-fix pass]
+  H --> I[Write report file]
+  I --> J{Findings or modified files}
+  J -- No --> K[Persist state only]
+  J -- Yes --> L[Push bot branch]
+  L --> M[Create or update Merge Request]
+  M --> K
+  K --> N[Next polling cycle]
+  E --> N
+```
+
+For package-level details, see src/gitlab_bot/README.md.
+
 ## Features
 
 - Polling watcher for GitLab projects and branches.
@@ -97,6 +120,11 @@ Optional arguments:
 - `-OpenBrowser` (opens login and token pages)
 - `-TailLogs:$false` (skip log streaming)
 - `-TimeoutSeconds 1200` (override GitLab wait timeout)
+
+## Documentation Notes
+
+- Diagrams use Mermaid `graph TD` syntax for broad compatibility.
+- If your markdown renderer does not support Mermaid, use the step-by-step sections as the source of truth.
 
 ## How MR Automation Works
 
