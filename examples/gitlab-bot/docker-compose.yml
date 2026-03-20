@@ -1,0 +1,40 @@
+services:
+  gitlab:
+    image: gitlab/gitlab-ce:17.10.1-ce.0
+    container_name: local-gitlab
+    restart: unless-stopped
+    hostname: gitlab
+    shm_size: 256m
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://localhost:8080'
+        gitlab_rails['gitlab_shell_ssh_port'] = 2222
+        puma['port'] = 8081
+    ports:
+      - "8080:8080"
+      - "2222:22"
+    volumes:
+      - ./gitlab/config:/etc/gitlab
+      - ./gitlab/logs:/var/log/gitlab
+      - ./gitlab/data:/var/opt/gitlab
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -fsS http://localhost:8080/-/readiness || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+
+  gitlab-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gitlab-bot:latest
+    container_name: gitlab-bot
+    restart: unless-stopped
+    depends_on:
+      gitlab:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data

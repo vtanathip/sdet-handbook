@@ -1,0 +1,27 @@
+stages:
+  - validate
+
+variables:
+  UV_CACHE_DIR: "$CI_PROJECT_DIR/.cache/uv"
+
+cache:
+  paths:
+    - .cache/uv/
+
+lint-and-test:
+  stage: validate
+  image: python:3.11-slim
+  before_script:
+    - pip install --no-cache-dir uv
+    - uv pip install --system .[dev,scan]
+  script:
+    - ruff check src tests
+    - pytest -q
+
+build-image:
+  stage: validate
+  image: docker:27
+  services:
+    - docker:27-dind
+  script:
+    - docker build -t gitlab-bot:ci .

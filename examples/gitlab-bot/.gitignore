@@ -1,0 +1,16 @@
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.env
+/data/
+
+# Local GitLab container state and generated runtime data
+/gitlab/
+
+# Local package manager cache
+/npm-cache/

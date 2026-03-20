@@ -1,0 +1,41 @@
+[project]
+name = "gitlab-bot"
+version = "0.1.0"
+description = "Containerized GitLab scanning bot that opens merge requests for review"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "python-gitlab>=4.10.0",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.8.0",
+  "tenacity>=9.0.0",
+]
+
+[project.optional-dependencies]
+scan = [
+  "ruff>=0.11.0",
+  "bandit>=1.7.10",
+  "pip-audit>=2.7.0",
+]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-mock>=3.14.0",
+]
+
+[project.scripts]
+gitlab-bot = "gitlab_bot.main:run"
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
