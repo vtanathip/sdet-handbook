@@ -1,0 +1,123 @@
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+}
+
+.hero {
+  margin-bottom: 1.25rem;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.8rem;
+  color: #0c4a6e;
+}
+
+.subtext {
+  color: #334155;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.mode-summary {
+  margin: 0.5rem 0 0;
+  color: #1e293b;
+}
+
+.composer {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.button-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+input,
+select,
+button {
+  font: inherit;
+}
+
+input,
+select {
+  border: 1px solid #94a3b8;
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem;
+}
+
+button {
+  border: none;
+  border-radius: 8px;
+  padding: 0.55rem 0.8rem;
+  background: #0f766e;
+  color: #f8fafc;
+  cursor: pointer;
+}
+
+button.ghost {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.task-list {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.task-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem;
+  background: #f8fafc;
+}
+
+.task-item label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.done {
+  text-decoration: line-through;
+  color: #64748b;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.45);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.modal {
+  width: min(460px, 92vw);
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 1rem;
+  border: 1px solid #94a3b8;
+}
