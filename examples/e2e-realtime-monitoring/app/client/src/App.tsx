@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Todo } from './types';
 import AddTodo from './components/AddTodo';
 import TodoList from './components/TodoList';
@@ -23,7 +23,7 @@ export default function App() {
   }, []);
 
   // ── Create ───────────────────────────────────────────────────────────────
-  async function handleAdd(title) {
+  async function handleAdd(title: string) {
     const res = await fetch(API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -71,7 +71,7 @@ export default function App() {
   );
 }
 
-const styles = {
+const styles: Record<string, CSSProperties> = {
   page: {
     minHeight: '100vh',
     display: 'flex',

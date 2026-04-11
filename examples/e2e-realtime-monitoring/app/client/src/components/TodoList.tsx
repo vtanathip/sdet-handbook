@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { Todo } from '../types';
 import TodoItem from './TodoItem';
 
@@ -32,7 +33,7 @@ export default function TodoList({ todos, onToggle, onDelete }: TodoListProps) {
   );
 }
 
-const styles = {
+const styles: Record<string, CSSProperties> = {
   list: {
     listStyle: 'none',
     display: 'flex',

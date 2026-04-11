@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type CSSProperties, type FormEvent } from 'react';
 
 interface AddTodoProps {
   onAdd: (title: string) => Promise<void>;
@@ -8,7 +8,7 @@ export default function AddTodo({ onAdd }: AddTodoProps) {
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
 
-  async function handleSubmit(e) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const title = value.trim();
     if (!title) return;
@@ -37,7 +37,7 @@ export default function AddTodo({ onAdd }: AddTodoProps) {
   );
 }
 
-const styles = {
+const styles: Record<string, CSSProperties> = {
   form: {
     display: 'flex',
     gap: '8px',
