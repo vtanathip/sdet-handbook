@@ -35,6 +35,8 @@ class NetworkOutputs(TypedDict):
     vpc: aws.ec2.Vpc
     subnet: aws.ec2.Subnet
     security_group: aws.ec2.SecurityGroup
+    db_subnet_a: aws.ec2.Subnet
+    db_subnet_b: aws.ec2.Subnet
 
 
 def create_network(tags: dict[str, str]) -> NetworkOutputs:
@@ -66,6 +68,25 @@ def create_network(tags: dict[str, str]) -> NetworkOutputs:
         cidr_block=_SUBNET_CIDR,
         map_public_ip_on_launch=True,
         tags={**tags, "Name": "perf-test-public-subnet"},
+    )
+
+    # ── Private DB Subnets (two AZs required for RDS SubnetGroup) ─────────
+    db_subnet_a = aws.ec2.Subnet(
+        "db-subnet-a",
+        vpc_id=vpc.id,
+        cidr_block="10.0.2.0/24",
+        availability_zone_id="use1-az1",
+        map_public_ip_on_launch=False,
+        tags={**tags, "Name": "perf-test-db-subnet-a"},
+    )
+
+    db_subnet_b = aws.ec2.Subnet(
+        "db-subnet-b",
+        vpc_id=vpc.id,
+        cidr_block="10.0.3.0/24",
+        availability_zone_id="use1-az2",
+        map_public_ip_on_launch=False,
+        tags={**tags, "Name": "perf-test-db-subnet-b"},
     )
 
     # ── Internet Gateway ──────────────────────────────────────────────────
@@ -140,4 +161,5 @@ def create_network(tags: dict[str, str]) -> NetworkOutputs:
         tags={**tags, "Name": "perf-test-sg"},
     )
 
-    return NetworkOutputs(vpc=vpc, subnet=subnet, security_group=sg)
+    return NetworkOutputs(vpc=vpc, subnet=subnet, security_group=sg,
+                          db_subnet_a=db_subnet_a, db_subnet_b=db_subnet_b)
