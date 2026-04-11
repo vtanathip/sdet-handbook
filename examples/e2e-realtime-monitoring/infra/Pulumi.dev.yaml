@@ -1,0 +1,4 @@
+config:
+  aws:region: us-east-1
+  perf-test-env:dd-api-key:
+    secure: PLACEHOLDER_SET_WITH_pulumi_config_set_secret
