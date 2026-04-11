@@ -1,6 +1,10 @@
 import { useState } from 'react';
 
-export default function AddTodo({ onAdd }) {
+interface AddTodoProps {
+  onAdd: (title: string) => Promise<void>;
+}
+
+export default function AddTodo({ onAdd }: AddTodoProps) {
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
 

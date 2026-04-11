@@ -10,7 +10,7 @@ The script:
   3. Sets Datadog + PostgreSQL environment variables at the Machine level.
   4. Installs Chocolatey, then Node.js LTS, Git, NSSM, and psql (postgresql).
   5. Clones the application repository and installs npm dependencies.
-  6. Builds the React client (npm run build -w client).
+  6. Builds the React client (npm run build -w client) and compiles the server TypeScript (npm run build -w server).
   7. Runs the DB migration SQL via psql.
   8. Registers and starts the Node.js API server as a Windows service via NSSM.
 
@@ -128,6 +128,9 @@ npm install --workspaces
 Write-Host 'Building React client...'
 npm run build --workspace client
 Write-Host 'Client build complete.'
+Write-Host 'Compiling server TypeScript...'
+npm run build --workspace server
+Write-Host 'Server build complete.'
 
 # ── 10. Run database migration ────────────────────────────────────────────
 Write-Host 'Running database migration...'
@@ -139,7 +142,7 @@ Write-Host 'Database migration complete.'
 # ── 11. Register Todo API as a Windows service via NSSM ───────────────────
 Write-Host 'Registering TodoApp service with NSSM...'
 $nodePath  = (Get-Command node).Source
-$indexPath = Join-Path $appDir 'server\\index.js'
+$indexPath = Join-Path $appDir 'server\\dist\\index.js'
 $logDir    = 'C:\\app\\logs'
 if (-not (Test-Path $logDir)) {{ New-Item -ItemType Directory -Path $logDir -Force | Out-Null }}
 

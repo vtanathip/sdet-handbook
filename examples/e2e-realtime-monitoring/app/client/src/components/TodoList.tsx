@@ -1,6 +1,13 @@
-import TodoItem from './TodoItem.jsx';
+import { Todo } from '../types';
+import TodoItem from './TodoItem';
 
-export default function TodoList({ todos, onToggle, onDelete }) {
+interface TodoListProps {
+  todos: Todo[];
+  onToggle: (id: number, completed: boolean) => Promise<void>;
+  onDelete: (id: number) => Promise<void>;
+}
+
+export default function TodoList({ todos, onToggle, onDelete }: TodoListProps) {
   if (todos.length === 0) {
     return (
       <p style={{ textAlign: 'center', color: '#a0aec0', fontSize: '0.9rem', marginTop: '24px' }}>

@@ -1,20 +1,21 @@
 import { useEffect, useState } from 'react';
-import AddTodo from './components/AddTodo.jsx';
-import TodoList from './components/TodoList.jsx';
+import { Todo } from './types';
+import AddTodo from './components/AddTodo';
+import TodoList from './components/TodoList';
 
 const API = '/api/todos';
 
 export default function App() {
-  const [todos, setTodos] = useState([]);
+  const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
   // ── Fetch all todos ──────────────────────────────────────────────────────
   useEffect(() => {
     fetch(API)
       .then((r) => {
         if (!r.ok) throw new Error(`Server error ${r.status}`);
-        return r.json();
+        return r.json() as Promise<Todo[]>;
       })
       .then((data) => setTodos(data))
       .catch((e) => setError(e.message))
@@ -29,24 +30,24 @@ export default function App() {
       body: JSON.stringify({ title }),
     });
     if (!res.ok) return;
-    const todo = await res.json();
+    const todo = (await res.json()) as Todo;
     setTodos((prev) => [todo, ...prev]);
   }
 
   // ── Toggle completed ─────────────────────────────────────────────────────
-  async function handleToggle(id, completed) {
+  async function handleToggle(id: number, completed: boolean) {
     const res = await fetch(`${API}/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ completed }),
     });
     if (!res.ok) return;
-    const updated = await res.json();
+    const updated = (await res.json()) as Todo;
     setTodos((prev) => prev.map((t) => (t.id === id ? updated : t)));
   }
 
   // ── Delete ───────────────────────────────────────────────────────────────
-  async function handleDelete(id) {
+  async function handleDelete(id: number) {
     const res = await fetch(`${API}/${id}`, { method: 'DELETE' });
     if (!res.ok) return;
     setTodos((prev) => prev.filter((t) => t.id !== id));

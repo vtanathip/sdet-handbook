@@ -1,4 +1,12 @@
-export default function TodoItem({ todo, onToggle, onDelete }) {
+import { Todo } from '../types';
+
+interface TodoItemProps {
+  todo: Todo;
+  onToggle: (id: number, completed: boolean) => Promise<void>;
+  onDelete: (id: number) => Promise<void>;
+}
+
+export default function TodoItem({ todo, onToggle, onDelete }: TodoItemProps) {
   return (
     <li style={styles.item}>
       <label style={styles.label}>
