@@ -7,13 +7,17 @@ const router = Router();
 // ── GET /api/todos ──────────────────────────────────────────────────────────
 router.get('/', async (_req: Request, res: Response) => {
   try {
+    console.log('[todos] GET / - Executing query: SELECT * FROM todos ORDER BY created_at DESC');
     const { rows } = await pool.query<Todo>(
       'SELECT * FROM todos ORDER BY created_at DESC'
     );
+    console.log('[todos] GET / - Retrieved', rows.length, 'todos');
     res.json(rows);
   } catch (err) {
-    console.error('[todos] GET /:', (err as Error).message);
-    res.status(500).json({ error: 'Failed to fetch todos' });
+    const errorMsg = (err as Error).message;
+    console.error('[todos] GET / - Query failed:', errorMsg);
+    console.error('[todos] GET / - Full error:', err);
+    res.status(500).json({ error: 'Failed to fetch todos', details: errorMsg });
   }
 });
 

@@ -12,13 +12,25 @@ export default function App() {
 
   // ── Fetch all todos ──────────────────────────────────────────────────────
   useEffect(() => {
+    console.log('Fetching todos from:', API);
     fetch(API)
       .then((r) => {
-        if (!r.ok) throw new Error(`Server error ${r.status}`);
+        console.log('Response status:', r.status);
+        if (!r.ok) {
+          const errorMsg = `Server error ${r.status}`;
+          console.error(errorMsg);
+          throw new Error(errorMsg);
+        }
         return r.json() as Promise<Todo[]>;
       })
-      .then((data) => setTodos(data))
-      .catch((e) => setError(e.message))
+      .then((data) => {
+        console.log('Todos loaded:', data);
+        setTodos(data);
+      })
+      .catch((e) => {
+        console.error('Error fetching todos:', e);
+        setError(e.message);
+      })
       .finally(() => setLoading(false));
   }, []);
 
