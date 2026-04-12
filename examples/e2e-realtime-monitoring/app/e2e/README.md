@@ -51,3 +51,35 @@ Optional:
 
 - UI flow: create, toggle, delete todo
 - API flow: update title + negative validations
+
+## One-command flow scripts
+
+From repo root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-e2e.ps1
+```
+
+Silent mode (hidden app terminals + quieter test reporter):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-e2e.ps1 -Silent
+```
+
+Silent mode without running tests yet:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-e2e.ps1 -SkipTests -Silent
+```
+
+Stop everything:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\stop-e2e.ps1
+```
+
+If Docker stop is temporarily unavailable, stop only app processes first:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\stop-e2e.ps1 -KeepDatabase
+```
