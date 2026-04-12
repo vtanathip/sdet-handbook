@@ -38,7 +38,8 @@ Write-Host "Starting container with: docker-compose up -d" -ForegroundColor Cyan
 try {
     $output = docker-compose up -d 2>&1
     Write-Host "Container started" -ForegroundColor Green
-} catch {
+}
+catch {
     Write-Host "Failed to start container" -ForegroundColor Red
     Write-Host $_ -ForegroundColor Red
     exit 1

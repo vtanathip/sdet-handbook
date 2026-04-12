@@ -40,7 +40,8 @@ $dbExists = psql -h $DbHost -U postgres -l 2>$null | Select-String $DbName
 
 if ($dbExists) {
     Write-Host "Database already exists" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "Creating database and user..." -ForegroundColor Cyan
     
     $sqlCommands = "CREATE USER $DbUser WITH PASSWORD '$DbPassword';" + [char]13 + [char]10
@@ -50,7 +51,8 @@ if ($dbExists) {
     try {
         $sqlCommands | psql -h $DbHost -U postgres 2>&1 | Out-Null
         Write-Host "Database created successfully" -ForegroundColor Green
-    } catch {
+    }
+    catch {
         Write-Host "Failed to create database" -ForegroundColor Red
         exit 1
     }
@@ -69,7 +71,8 @@ if (-not (Test-Path $migrationFile)) {
 try {
     Get-Content $migrationFile | psql -h $DbHost -U $DbUser -d $DbName 2>&1 | Out-Null
     Write-Host "Migrations completed" -ForegroundColor Green
-} catch {
+}
+catch {
     Write-Host "Failed to run migrations" -ForegroundColor Red
     exit 1
 }
