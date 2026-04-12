@@ -4,12 +4,19 @@
     "private": true,
     "workspaces": [
         "server",
-        "client"
+        "client",
+        "e2e"
     ],
     "scripts": {
         "dev:server": "npm run dev -w server",
         "dev:client": "npm run dev -w client",
         "build": "npm run build -w client",
-        "start": "npm run start -w server"
+        "start": "npm run start -w server",
+        "test:e2e": "npm run test -w e2e",
+        "test:e2e:all": "npm run test:all -w e2e",
+        "test:e2e:local": "npm run test:local -w e2e",
+        "test:e2e:ec2": "npm run test:ec2 -w e2e",
+        "test:e2e:ui": "npm run test:ui -w e2e",
+        "test:e2e:install": "npm run install:browsers -w e2e"
     }
 }
