@@ -44,6 +44,10 @@ _SCRIPT_TEMPLATE = """\
 <powershell>
 $ErrorActionPreference = 'Stop'
 
+# Bootstrap transcript for post-mortem troubleshooting.
+$bootstrapLog = 'C:\\Windows\\Temp\\todo-bootstrap.log'
+Start-Transcript -Path $bootstrapLog -Append -Force
+
 # ── 1. Download Datadog Agent MSI ──────────────────────────────────────────
 $msiUrl  = 'https://windows-agent.datadoghq.com/datadog-agent-7-latest.amd64.msi'
 $msiPath = 'C:\\Windows\\Temp\\datadog-agent-latest.amd64.msi'
@@ -81,6 +85,11 @@ Write-Host 'Setting system environment variables...'
 [Environment]::SetEnvironmentVariable('PGPASSWORD',            '{rds_password}', 'Machine')
 [Environment]::SetEnvironmentVariable('NODE_ENV',              'production',   'Machine')
 [Environment]::SetEnvironmentVariable('PORT',                  '3001',         'Machine')
+
+# Ensure Windows Firewall allows inbound app traffic on port 3001.
+if (-not (Get-NetFirewallRule -DisplayName 'Allow TodoApp 3001' -ErrorAction SilentlyContinue)) {{
+  New-NetFirewallRule -DisplayName 'Allow TodoApp 3001' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3001 | Out-Null
+}}
 
 # ── 4. Create windows_performance_counters integration config ──────────────
 $confDir = 'C:\\ProgramData\\Datadog\\conf.d\\windows_performance_counters.d'
@@ -168,6 +177,42 @@ nssm set TodoApp Start SERVICE_AUTO_START
 
 Write-Host 'Starting TodoApp service...'
 nssm start TodoApp
+
+# ── 12. Verify app is actually listening on localhost:3001 ───────────────
+Write-Host 'Waiting for Todo app to become ready on localhost:3001...'
+$maxAttempts = 24
+$ready = $false
+for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {{
+  try {{
+    $tcp = Test-NetConnection -ComputerName 127.0.0.1 -Port 3001 -WarningAction SilentlyContinue
+    if ($tcp.TcpTestSucceeded) {{
+      $ready = $true
+      break
+    }}
+  }} catch {{
+    # Ignore transient socket failures while the process is booting.
+  }}
+  Start-Sleep -Seconds 5
+}}
+
+if (-not $ready) {{
+  Write-Host 'Todo app did not become ready in time.'
+  Write-Host 'TodoApp service status:'
+  Get-Service TodoApp | Format-List * | Out-String | Write-Host
+  if (Test-Path "$logDir\\stderr.log") {{
+    Write-Host 'Last 200 lines of stderr.log:'
+    Get-Content "$logDir\\stderr.log" -Tail 200 | Write-Host
+  }}
+  if (Test-Path "$logDir\\stdout.log") {{
+    Write-Host 'Last 200 lines of stdout.log:'
+    Get-Content "$logDir\\stdout.log" -Tail 200 | Write-Host
+  }}
+  Stop-Transcript
+  throw 'Todo app failed readiness check on port 3001.'
+}}
+
+Write-Host 'Todo app is ready on port 3001.'
+Stop-Transcript
 Write-Host 'Startup script completed successfully.'
 </powershell>
 """

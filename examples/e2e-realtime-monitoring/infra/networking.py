@@ -133,6 +133,14 @@ def create_network(tags: dict[str, str]) -> NetworkOutputs:
             "Perf-test host: Datadog internal (443, 8126) + RDP management (3389)"
         ),
         ingress=[
+            # Todo app web/API access (tighten to trusted CIDRs in production)
+            aws.ec2.SecurityGroupIngressArgs(
+                description="Todo app HTTP",
+                protocol="tcp",
+                from_port=3001,
+                to_port=3001,
+                cidr_blocks=["0.0.0.0/0"],
+            ),
             # Datadog HTTPS — internal VPC only
             aws.ec2.SecurityGroupIngressArgs(
                 description="Datadog HTTPS internal",
