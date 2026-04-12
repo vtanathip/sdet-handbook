@@ -50,7 +50,7 @@ def create_network(tags: dict[str, str]) -> NetworkOutputs:
         upper=False,
         numeric=True,
     )
-    name = lambda base: pulumi.Output.concat(base, "-", suffix.result)
+    def name(base): return pulumi.Output.concat(base, "-", suffix.result)
 
     # ── VPC ───────────────────────────────────────────────────────────────
     vpc = aws.ec2.Vpc(
@@ -66,8 +66,14 @@ def create_network(tags: dict[str, str]) -> NetworkOutputs:
         "public-subnet",
         vpc_id=vpc.id,
         cidr_block=_SUBNET_CIDR,
+        # c5.xlarge Windows is not available in every AZ in us-east-1.
+        # Pin the app subnet to a supported AZ to avoid RunInstances failures.
+        availability_zone="us-east-1a",
         map_public_ip_on_launch=True,
         tags={**tags, "Name": "perf-test-public-subnet"},
+        # Changing subnet AZ requires replacement; recreate-after-delete avoids
+        # temporary duplicate CIDR conflicts during replacement.
+        opts=pulumi.ResourceOptions(delete_before_replace=True),
     )
 
     # ── Private DB Subnets (two AZs required for RDS SubnetGroup) ─────────
@@ -118,6 +124,10 @@ def create_network(tags: dict[str, str]) -> NetworkOutputs:
     # ── Security Group ─────────────────────────────────────────────────────
     sg = aws.ec2.SecurityGroup(
         "sg",
+        # Security group names cannot begin with "sg-" in AWS.
+        # Pulumi auto-naming from logical name "sg" can generate that prefix,
+        # so use an explicit valid name base instead.
+        name=name("perf-test-sg"),
         vpc_id=vpc.id,
         description=(
             "Perf-test host: Datadog internal (443, 8126) + RDP management (3389)"

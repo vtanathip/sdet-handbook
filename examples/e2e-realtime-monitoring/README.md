@@ -193,61 +193,222 @@ npm run test:e2e:ui       # Playwright UI mode
 
 Open http://localhost:5173 in a browser.
 
-## Deploying to AWS
+## Infrastructure Setup (Step by Step)
 
-The `infra/` directory contains a Pulumi stack that provisions a complete environment:
+### Prerequisites
+
+| Tool | Version | Purpose |
+|---|---|---|
+| [Pulumi CLI](https://www.pulumi.com/docs/install/) | 3.x | Infrastructure as Code engine |
+| [Python](https://www.python.org/) | 3.9+ | Pulumi runtime (uses `uv` for dependency management) |
+| [AWS CLI](https://aws.amazon.com/cli/) | 2.x | AWS credential management |
+| [Datadog Account](https://www.datadoghq.com/) | — | You need an API key from **Organization Settings → API Keys** |
+
+### Step 1 — Configure AWS Credentials
+
+Make sure your AWS CLI is configured with credentials that have permission to create VPC, EC2, RDS, and Security Group resources:
+
+```powershell
+aws configure
+# AWS Access Key ID:     <your-key>
+# AWS Secret Access Key: <your-secret>
+# Default region:        us-east-1
+# Default output format: json
+```
+
+### Step 2 — Get Your Datadog API Key
+
+1. Log into [Datadog](https://app.datadoghq.com/)
+2. Go to **Organization Settings** → **API Keys**
+3. Click **+ New Key**, name it `perf-test-env`
+4. Copy the key — you'll need it in Step 4
+
+### Step 3 — Initialize the Pulumi Stack
+
+```powershell
+cd infra
+
+# Create a virtual environment and install dependencies
+uv sync
+
+# Initialize or select the dev stack
+pulumi stack init dev
+# Or if it already exists:
+pulumi stack select dev
+```
+
+### Step 4 — Set Pulumi Configuration & Secrets
+
+```powershell
+# AWS region
+pulumi config set aws:region us-east-1
+
+# Datadog API key (stored encrypted in Pulumi state)
+pulumi config set --secret dd-api-key <YOUR_DATADOG_API_KEY>
+
+# RDS database password (stored encrypted)
+pulumi config set --secret rds-password <YOUR_SECURE_DB_PASSWORD>
+
+# (Optional) Override the default repository URL
+pulumi config set repo-url https://github.com/vtanathip/sdet-ai-handbook.git
+```
+
+Verify everything is set:
+```powershell
+pulumi config
+# KEY                              VALUE
+# aws:region                       us-east-1
+# perf-test-env:dd-api-key         [secret]
+# perf-test-env:rds-password       [secret]
+# perf-test-env:repo-url           https://github.com/...
+```
+
+### Step 5 — Deploy
+
+```powershell
+pulumi up
+```
+
+Pulumi provisions resources in this order:
 
 ```mermaid
-graph LR
-    subgraph Pulumi Stack
-        A[config.py<br/>Secrets + Tags] --> B[networking.py<br/>VPC + Subnets + SG]
-        B --> C[database.py<br/>RDS PostgreSQL 15]
-        B --> D[userdata.py<br/>Bootstrap Script]
-        C --> D
-        D --> E[compute.py<br/>EC2 c5.xlarge]
-    end
+graph TD
+    A["<b>Step 1</b><br/>VPC + Subnets + IGW + Security Groups<br/><code>networking.py</code>"] --> B["<b>Step 2</b><br/>RDS PostgreSQL 15<br/>(private subnet, encrypted)<br/><code>database.py</code>"]
+    A --> C["<b>Step 3</b><br/>Build userdata script<br/>(resolves secrets at deploy time)<br/><code>userdata.py</code>"]
+    B --> C
+    C --> D["<b>Step 4</b><br/>EC2 c5.xlarge<br/>Windows Server 2022<br/><code>compute.py</code>"]
+    D --> E["<b>Auto-bootstrap on first boot</b><br/>Datadog Agent + Node.js + App + NSSM service"]
+```
+
+### Step 6 — Verify the Deployment
+
+```powershell
+# Get the EC2 public IP
+pulumi stack output instance_public_ip
+
+# Get the RDS endpoint
+pulumi stack output rds_endpoint
+```
+
+Wait 5–10 minutes for the EC2 userdata to finish bootstrapping, then verify:
+
+```powershell
+# Health check — should return {"status":"ok"}
+curl http://<EC2_PUBLIC_IP>:3001/health
 ```
 
 ### What Gets Provisioned
 
 | Resource | Spec | Purpose |
 |---|---|---|
-| VPC | `10.0.0.0/16` with public + 2 private subnets | Network isolation |
-| EC2 | `c5.xlarge` Windows Server 2022 | App host (compute-optimized for stable perf tests) |
-| RDS | PostgreSQL 15, `db.t3.medium`, encrypted, private subnet | Database (not publicly accessible) |
-| Datadog Agent | v7 MSI, auto-installed via userdata | APM, profiling, Windows perf counters |
-| NSSM Service | `TodoApp` Windows service | Auto-start Node.js API on boot |
+| VPC | `10.0.0.0/16` — 1 public + 2 private subnets | Network isolation |
+| Security Groups | EC2 SG (443, 8126, 3389) + RDS SG (5432 from EC2 only) | Least-privilege access |
+| RDS | PostgreSQL 15, `db.t3.medium`, gp3, encrypted, private subnet | Database (not publicly accessible) |
+| EC2 | `c5.xlarge` Windows Server 2022 Full, gp3 50GB, public IP | Compute-optimized app host |
+| Datadog Agent | v7 MSI, auto-installed | APM + profiling + Windows perf counters |
+| NSSM Service | `TodoApp` registered as Windows service | Auto-start Node.js API on boot |
 
-### Deploy Steps
+---
 
-```powershell
-cd infra
+## Datadog Setup (Step by Step)
 
-# Set secrets (one-time)
-pulumi config set --secret dd-api-key <YOUR_DATADOG_API_KEY>
-pulumi config set --secret rds-password <YOUR_DB_PASSWORD>
-pulumi config set repo-url https://github.com/vtanathip/sdet-ai-handbook.git
+### What Happens Automatically (via EC2 userdata)
 
-# Deploy
-pulumi up
+When the EC2 instance boots, the PowerShell userdata script (`infra/userdata.py`) performs the full Datadog setup — **no manual configuration needed**:
 
-# Get the public IP
-pulumi stack output instance_public_ip
+```mermaid
+graph TD
+    A["<b>1. Download Agent</b><br/>Datadog Agent v7 MSI<br/>from windows-agent.datadoghq.com"] --> B["<b>2. Silent Install</b><br/>msiexec /qn with APIKEY + SITE<br/>Tags: env:perf-test, project:ui-perf-test"]
+    B --> C["<b>3. System Env Vars</b><br/>DD_API_KEY, DD_ENV, DD_SERVICE,<br/>DD_VERSION, DD_PROFILING_ENABLED"]
+    C --> D["<b>4. PDH Counters Config</b><br/>windows_performance_counters.d/conf.yaml<br/>CPU, Memory, Disk metrics"]
+    D --> E["<b>5. Restart Agent Service</b><br/>datadogagent service picks up<br/>new config + env vars"]
+    E --> F["<b>6. App Starts with dd-trace</b><br/>NSSM service runs node with<br/>DD_* env vars → traces flow"]
 ```
 
-### EC2 Bootstrap (userdata.py)
+### Step 1 — Agent Installation (automated)
 
-The EC2 instance self-configures on first boot via a PowerShell userdata script that:
+The userdata downloads and installs the Datadog Agent MSI with these settings:
 
-1. Downloads and installs the **Datadog Agent MSI** with APM + profiling enabled
-2. Writes `windows_performance_counters` config (CPU, memory, disk metrics)
-3. Sets all environment variables at the **Machine level** (`DD_*`, `PG*`, `NODE_ENV`)
-4. Installs **Node.js**, **Git**, **NSSM**, **psql** via Chocolatey
-5. Clones the repo, runs `npm install`, builds client + server
-6. Runs the database migration (`001_todos.sql`) against RDS
-7. Registers and starts the API as a **Windows service** via NSSM
+| Setting | Value |
+|---|---|
+| `APIKEY` | Your Datadog API key (from Pulumi secret) |
+| `SITE` | `datadoghq.com` |
+| `TAGS` | `env:perf-test`, `project:ui-perf-test`, `team:qa-automation` |
 
-### Run E2E Tests Against EC2
+### Step 2 — Environment Variables (automated)
+
+These are set at the **Machine level** so both the Agent and the Node.js app read them:
+
+| Variable | Value | Used By |
+|---|---|---|
+| `DD_API_KEY` | *(secret)* | Datadog Agent |
+| `DD_ENV` | `perf-test` | Agent + dd-trace |
+| `DD_SERVICE` | `todo-api` | dd-trace (service name in APM) |
+| `DD_VERSION` | `1.0.0` | dd-trace (version tag on traces) |
+| `DD_PROFILING_ENABLED` | `true` | dd-trace (continuous profiler) |
+
+### Step 3 — Windows Performance Counters (automated)
+
+A `conf.yaml` is written to `C:\ProgramData\Datadog\conf.d\windows_performance_counters.d\`:
+
+| Counter | Metric Name |
+|---|---|
+| `\Processor(_Total)\% Processor Time` | `cpu.percent_processor_time` |
+| `\Memory\Available MBytes` | `memory.available_mbytes` |
+| `\LogicalDisk(_Total)\% Free Space` | `disk.percent_free_space` |
+
+### Step 4 — Application-Level Tracing (dd-trace SDK)
+
+The `dd-trace` npm package is initialized as the **very first import** in the server:
+
+```typescript
+// app/server/src/index.ts — MUST be the first import
+import tracer from 'dd-trace';
+tracer.init({
+  service:        'todo-api',
+  env:            'perf-test',
+  version:        '1.0.0',
+  profiling:      true,
+  logInjection:   true,
+  runtimeMetrics: true,
+});
+// All subsequent imports (express, pg) are auto-instrumented
+```
+
+This gives you:
+- **APM Traces** — every Express route handler and pg query as spans
+- **Continuous Profiler** — CPU flame graphs, heap snapshots, wall-clock profiles
+- **Log Correlation** — `dd.trace_id` and `dd.span_id` injected into `console.log` output
+- **Runtime Metrics** — event loop lag, GC pause time, heap usage
+
+### Step 5 — Verify in Datadog
+
+After deployment, confirm telemetry is flowing:
+
+1. **Infrastructure → Host Map** — look for the EC2 instance hostname
+2. **APM → Services** — `todo-api` should appear with traces
+3. **APM → Traces** — search `env:perf-test` to see request traces
+4. **Profiling → Profiles** — CPU and heap profiles for `todo-api`
+5. **Metrics Explorer** — search `cpu.percent_processor_time` for Windows PDH data
+
+### Step 6 — Correlate E2E Tests with Traces
+
+After running tests against EC2:
+
+```powershell
+.\start-e2e.ps1 -Target ec2 -Ec2BaseUrl http://<EC2_PUBLIC_IP>:3001
+```
+
+Search in Datadog APM:
+```
+@http.request.headers.x-e2e-run-id:pw-*
+```
+
+Each trace shows the full path: **Playwright request → Express route → SQL query**, tagged with the test name that generated it.
+
+---
+
+## Run E2E Tests Against EC2
 
 ```powershell
 # Using the orchestration script
@@ -259,7 +420,7 @@ cd app
 npm run test:e2e:ec2
 ```
 
-### Tear Down Infrastructure
+## Tear Down Infrastructure
 
 ```powershell
 cd infra

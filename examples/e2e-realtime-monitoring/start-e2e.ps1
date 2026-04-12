@@ -38,7 +38,7 @@ function Stop-ListenersOnPort {
     param([int]$Port)
 
     $connections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
-        Select-Object -ExpandProperty OwningProcess -Unique
+    Select-Object -ExpandProperty OwningProcess -Unique
 
     if (-not $connections) { return }
 
@@ -65,8 +65,8 @@ function Wait-ForUrl {
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         try {
             $requestParams = @{
-                Uri = $Url
-                Method = 'Get'
+                Uri        = $Url
+                Method     = 'Get'
                 TimeoutSec = 5
             }
 
@@ -153,11 +153,11 @@ if ($requiresLocalStack) {
 }
 
 $state = [ordered]@{
-    target = $Target
-    startedAt = (Get-Date).ToString('o')
-    backendPid = $serverPid
+    target      = $Target
+    startedAt   = (Get-Date).ToString('o')
+    backendPid  = $serverPid
     frontendPid = $clientPid
-    ec2BaseUrl = $Ec2BaseUrl
+    ec2BaseUrl  = $Ec2BaseUrl
 }
 $state | ConvertTo-Json | Set-Content -Path $statePath -Encoding UTF8
 
