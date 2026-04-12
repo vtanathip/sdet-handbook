@@ -293,8 +293,24 @@ pulumi stack output rds_endpoint
 Wait 5–10 minutes for the EC2 userdata to finish bootstrapping, then verify:
 
 ```powershell
+# The React app is served by the Express process on port 3001.
 # Health check — should return {"status":"ok"}
 curl http://<EC2_PUBLIC_IP>:3001/health
+
+# Open the UI
+start http://<EC2_PUBLIC_IP>:3001
+```
+
+If the health check times out, the instance is usually still bootstrapping the
+application or the Windows service failed during startup. RDP to the instance
+and inspect:
+
+```powershell
+Get-Service TodoApp
+nssm status TodoApp
+Get-Content C:\Windows\Temp\todo-bootstrap.log -Tail 200
+Get-Content C:\app\logs\stdout.log -Tail 200
+Get-Content C:\app\logs\stderr.log -Tail 200
 ```
 
 ### What Gets Provisioned
@@ -302,11 +318,11 @@ curl http://<EC2_PUBLIC_IP>:3001/health
 | Resource | Spec | Purpose |
 |---|---|---|
 | VPC | `10.0.0.0/16` — 1 public + 2 private subnets | Network isolation |
-| Security Groups | EC2 SG (443, 8126, 3389) + RDS SG (5432 from EC2 only) | Least-privilege access |
+| Security Groups | EC2 SG (3001, 443, 8126, 3389) + RDS SG (5432 from EC2 only) | App access + least-privilege data access |
 | RDS | PostgreSQL 15, `db.t3.medium`, gp3, encrypted, private subnet | Database (not publicly accessible) |
 | EC2 | `c5.xlarge` Windows Server 2022 Full, gp3 50GB, public IP | Compute-optimized app host |
 | Datadog Agent | v7 MSI, auto-installed | APM + profiling + Windows perf counters |
-| NSSM Service | `TodoApp` registered as Windows service | Auto-start Node.js API on boot |
+| NSSM Service | `TodoApp` registered as Windows service | Auto-start Node.js API and serve the built React client on boot |
 
 ---
 
@@ -356,6 +372,17 @@ A `conf.yaml` is written to `C:\ProgramData\Datadog\conf.d\windows_performance_c
 | `\Processor(_Total)\% Processor Time` | `cpu.percent_processor_time` |
 | `\Memory\Available MBytes` | `memory.available_mbytes` |
 | `\LogicalDisk(_Total)\% Free Space` | `disk.percent_free_space` |
+
+### Step 3.5 — App Access and Bootstrap Diagnostics (automated)
+
+The userdata script also configures the host so the application can be reached
+from a browser and so startup failures are easier to inspect:
+
+| Item | Behavior |
+|---|---|
+| Windows Firewall | Opens inbound TCP `3001` for the Todo app |
+| Bootstrap transcript | Writes provisioning logs to `C:\Windows\Temp\todo-bootstrap.log` |
+| Readiness check | Waits for `localhost:3001` before marking bootstrap complete |
 
 ### Step 4 — Application-Level Tracing (dd-trace SDK)
 
