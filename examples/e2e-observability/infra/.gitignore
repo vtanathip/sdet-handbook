@@ -6,6 +6,7 @@ Pulumi.*.yaml
 .venv/
 venv/
 env/
+.venv-*/
 
 # Python build artifacts
 __pycache__/

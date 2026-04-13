@@ -46,6 +46,14 @@ def create_instance_profile(
         tags={**tags, "Name": "perf-test-app-host-role"},
     )
 
+    # SSM Session Manager — enables `aws ssm start-session` for remote
+    # debugging without opening extra inbound ports (WinRM / SSH).
+    aws.iam.RolePolicyAttachment(
+        "app-host-ssm-policy",
+        role=role.name,
+        policy_arn="arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
+    )
+
     # Least-privilege: only GetObject + ListBucket on the artifacts bucket
     aws.iam.RolePolicy(
         "app-host-s3-read-policy",

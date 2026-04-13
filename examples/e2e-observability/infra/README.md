@@ -175,6 +175,97 @@ This removes:
 
 **Warning**: This cannot be undone!
 
+## Debugging the VM
+
+### Quick Access via SSM (recommended)
+
+The instance has the SSM agent and `AmazonSSMManagedInstanceCore` policy
+attached, so you can open a remote PowerShell session without RDP:
+
+```powershell
+# Get the instance ID from Pulumi outputs
+$ip = pulumi stack output instance_public_ip
+
+# Find the instance ID by public IP (or use the AWS Console)
+$instanceId = aws ec2 describe-instances `
+  --filters "Name=ip-address,Values=$ip" `
+  --query "Reservations[0].Instances[0].InstanceId" --output text
+
+# Start an interactive session
+aws ssm start-session --target $instanceId
+```
+
+Once connected, run the debugging commands below.
+
+### Access via RDP
+
+```powershell
+# 1. Save the private key (if not done already)
+pulumi stack output ec2_private_key_pem --show-secrets | Set-Content -Path .\perf-test-app-host.pem -NoNewline
+
+# 2. Get the public IP
+pulumi stack output instance_public_ip
+
+# 3. In the AWS Console → EC2 → select instance → "Get password"
+#    Upload perf-test-app-host.pem to decrypt the Administrator password.
+
+# 4. RDP to <IP>:3389 with Administrator / <decrypted password>
+```
+
+### Datadog Agent Health
+
+Run these on the VM (via SSM or RDP):
+
+```powershell
+# Agent overall status — look for windows_performance_counters section
+& "C:\Program Files\Datadog\Datadog Agent\bin\agent.exe" status
+
+# Validate check configuration only (no data collection)
+& "C:\Program Files\Datadog\Datadog Agent\bin\agent.exe" configcheck
+
+# Show just the windows_performance_counters check status
+& "C:\Program Files\Datadog\Datadog Agent\bin\agent.exe" check windows_performance_counters
+
+# Restart the agent after config changes
+Restart-Service datadogagent -Force
+Get-Service datadogagent   # confirm Running
+```
+
+### Bootstrap Log
+
+The EC2 user-data startup script writes a full transcript:
+
+```powershell
+Get-Content C:\Windows\Temp\todo-bootstrap.log -Tail 100
+```
+
+### Datadog Config Files
+
+```powershell
+# Main agent config
+Get-Content "C:\ProgramData\Datadog\datadog.yaml"
+
+# windows_performance_counters check config (the one we fixed)
+Get-Content "C:\ProgramData\Datadog\conf.d\windows_performance_counters.d\conf.yaml"
+
+# Agent install log
+Get-Content "C:\Windows\Temp\datadog-install.log" -Tail 50
+```
+
+### Application Health
+
+```powershell
+# Check if the Todo API is responding
+Invoke-WebRequest -Uri http://localhost:3001/api/todos -UseBasicParsing
+
+# Check the NSSM service
+nssm status todo-api
+
+# App logs
+Get-Content C:\app\logs\stdout.log -Tail 50
+Get-Content C:\app\logs\stderr.log -Tail 50
+```
+
 ## Troubleshooting
 
 ### AWS Credentials Not Found

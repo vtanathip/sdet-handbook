@@ -28,17 +28,21 @@ import pulumi
 _PERF_CONF_YAML = r"""init_config:
 
 instances:
-  - counterSpecifier: '\Processor(_Total)\% Processor Time'
-    instanceName: cpu_total
-    measurementName: cpu.percent_processor_time
+  - metrics:
+      Processor:
+        name: cpu
+        counters:
+          - '% Processor Time': percent_processor_time
 
-  - counterSpecifier: '\Memory\Available MBytes'
-    instanceName: memory
-    measurementName: memory.available_mbytes
+      Memory:
+        name: memory
+        counters:
+          - 'Available MBytes': available_mbytes
 
-  - counterSpecifier: '\LogicalDisk(_Total)\% Free Space'
-    instanceName: disk_total
-    measurementName: disk.percent_free_space
+      LogicalDisk:
+        name: disk
+        counters:
+          - '% Free Space': percent_free_space
 """
 
 _SCRIPT_TEMPLATE = """\
