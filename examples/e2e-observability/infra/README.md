@@ -40,7 +40,7 @@ This directory contains the Infrastructure as Code (IaC) for deploying the Todo 
 ```powershell
 cd infra
 uv sync
-.\.venv\Scripts\Activate.ps1
+.\.venv-pulumi\Scripts\Activate.ps1
 ```
 
 ### 2. Configure Pulumi Stack
@@ -117,6 +117,8 @@ use with **Get password** in the EC2 console to decrypt the initial
 | `networking.py` | VPC, subnets, security groups |
 | `database.py` | RDS PostgreSQL setup |
 | `compute.py` | EC2 instance provisioning |
+| `iam.py` | EC2 IAM role, instance profile, SSM policy |
+| `storage.py` | S3 artifact bucket for deployment artifacts |
 | `userdata.py` | Windows startup script (app deployment) |
 | `Pulumi.yaml` | Project metadata |
 | `.gitignore` | Excludes secrets and artifacts |
@@ -259,7 +261,7 @@ Get-Content "C:\Windows\Temp\datadog-install.log" -Tail 50
 Invoke-WebRequest -Uri http://localhost:3001/api/todos -UseBasicParsing
 
 # Check the NSSM service
-nssm status todo-api
+nssm status TodoApp
 
 # App logs
 Get-Content C:\app\logs\stdout.log -Tail 50
@@ -276,7 +278,7 @@ aws configure
 
 ### Pulumi Not Found
 ```powershell
-.\.venv\Scripts\Activate.ps1
+.\.venv-pulumi\Scripts\Activate.ps1
 uv sync
 ```
 

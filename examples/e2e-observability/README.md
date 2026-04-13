@@ -29,7 +29,7 @@ graph TB
         EC2[EC2 c5.xlarge<br/>Windows Server 2022]
         DD_AGENT[Datadog Agent]
         RDS[(RDS PostgreSQL 15<br/>db.t3.medium)]
-        NSSM[NSSM Service<br/>todo-api]
+        NSSM[NSSM Service<br/>TodoApp]
     end
 
     subgraph Datadog Cloud
@@ -138,8 +138,12 @@ The API logs these alongside Datadog trace IDs, so you can search in Datadog:
 │   ├── networking.py    # VPC, subnets, IGW, security groups
 │   ├── database.py      # RDS PostgreSQL 15 (private subnet, encrypted)
 │   ├── compute.py       # EC2 c5.xlarge Windows Server 2022
+│   ├── iam.py           # EC2 IAM role, instance profile, SSM policy
+│   ├── storage.py       # S3 artifact bucket
 │   ├── userdata.py      # PowerShell bootstrap: Datadog Agent + app deploy
 │   └── config.py        # Pulumi secrets (DD API key, RDS password)
+├── build-artifact.ps1   # Build & upload app artifact to S3
+├── setup-db.ps1         # Initialize database schema
 ├── start-e2e.ps1        # One-command: DB → server → client → tests
 ├── stop-e2e.ps1         # Teardown all services
 ├── start-db.ps1         # Docker PostgreSQL only
