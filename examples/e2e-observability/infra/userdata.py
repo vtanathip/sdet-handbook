@@ -9,11 +9,13 @@ The script:
   2. Opens the Windows Firewall for the application port.
   3. Downloads and installs the Datadog Agent MSI (with retry).
   4. Writes the windows_performance_counters PDH conf.yaml.
-  5. Installs Chocolatey, then Node.js LTS and NSSM.
-  6. Downloads the pre-built application ZIP from S3 and extracts it.
-  7. Runs the DB migration SQL via Node.js using the app's pg dependency.
-  8. Registers and starts the Node.js API server as a Windows service via NSSM.
-  9. Verifies the app is listening on the expected port.
+  5. Appends explicit apm_config (APM enabled) to datadog.yaml.
+  6. Installs Chocolatey, then Node.js LTS and NSSM.
+  7. Downloads the pre-built application ZIP from S3 and extracts it.
+  8. Runs the DB migration SQL via Node.js using the app's pg dependency.
+  9. Registers and starts the Node.js API server as a Windows service via NSSM,
+     with a service dependency on datadogagent so dd-trace can connect on boot.
+ 10. Verifies the app is listening on the expected port.
 
 All secrets (api_key, rds_password) are resolved at deploy time through
 pulumi.Output.all so they are never materialised as plain-text strings.
@@ -146,6 +148,13 @@ $confYaml = @'
 $confYaml | Set-Content -Path "$confDir\\conf.yaml" -Encoding UTF8 -Force
 Write-Host 'windows_performance_counters conf.yaml written.'
 
+# Enable APM explicitly in datadog.yaml
+$ddYaml = 'C:\\ProgramData\\Datadog\\datadog.yaml'
+if ((Test-Path $ddYaml) -and -not (Select-String -Path $ddYaml -Pattern '^apm_config:' -Quiet)) {{
+  Add-Content -Path $ddYaml -Value "`napm_config:`n  enabled: true" -Encoding UTF8
+  Write-Host 'apm_config appended to datadog.yaml.'
+}}
+
 # Restart agent and verify the service reaches Running state
 if (Get-Service -Name 'datadogagent' -ErrorAction SilentlyContinue) {{
   Restart-Service -Name 'datadogagent' -Force
@@ -240,86 +249,36 @@ $s3Region = '{region}'
 $downloaded = $false
 
 # -- Attempt 1: AWS Tools for PowerShell -----------------------------------
-Write-Host 'Trying AWS PowerShell module (Read-S3Object)...'
 try {{
-  # Try both module variants (AWSPowerShell and AWS.Tools)
   $awsModuleLoaded = $false
   foreach ($modName in @('AWSPowerShell.NetCore', 'AWSPowerShell', 'AWS.Tools.S3')) {{
     if (Get-Module -ListAvailable -Name $modName -ErrorAction SilentlyContinue) {{
       Import-Module $modName -ErrorAction Stop
       Write-Host "Loaded module: $modName"
-      $awsModuleLoaded = $true
-      break
+      $awsModuleLoaded = $true; break
     }}
   }}
   if ($awsModuleLoaded) {{
-    # Module loaded - use Read-S3Object which auto-picks up IAM instance profile creds
     Write-Host "Downloading s3://$s3Bucket/$s3Key via Read-S3Object..."
     Read-S3Object -BucketName $s3Bucket -Key $s3Key -File $zipPath -Region $s3Region
-    if (Test-Path $zipPath) {{
-      $downloaded = $true
-      Write-Host "Downloaded via AWS PowerShell module."
-    }} else {{
-      Write-Host "Read-S3Object completed but file not found at $zipPath"
-    }}
-  }} else {{
-    Write-Host 'No AWS PowerShell module found, skipping to CLI fallback.'
+    if (Test-Path $zipPath) {{ $downloaded = $true; Write-Host 'Downloaded via PS module.' }}
   }}
-}} catch {{
-  Write-Host "AWS PowerShell module failed: $($_.Exception.Message)"
-}}
+}} catch {{ Write-Host "AWS PS module failed: $($_.Exception.Message)" }}
 
 # -- Attempt 2: AWS CLI (if PowerShell module failed) ----------------------
 if (-not $downloaded) {{
-  Write-Host 'Trying AWS CLI fallback...'
-  $awsCli = $null
-  $cliPaths = @(
-    'C:\\Program Files\\Amazon\\AWSCLIV2\\aws.exe',
-    'C:\\Program Files\\Amazon\\AWSCLI\\bin\\aws.exe',
-    'C:\\Program Files (x86)\\Amazon\\AWSCLI\\bin\\aws.exe'
-  )
-  foreach ($p in $cliPaths) {{
-    Write-Host "  Checking $p ..."
-    if (Test-Path $p) {{
-      $awsCli = $p
-      Write-Host "  Found AWS CLI at: $p"
-      break
-    }}
-  }}
-  if (-not $awsCli) {{
-    # Last-resort: PATH lookup
-    $awsCli = (Get-Command aws -ErrorAction SilentlyContinue).Source
-    if ($awsCli) {{ Write-Host "  Found AWS CLI in PATH: $awsCli" }}
-  }}
-
+  $awsCli = @('C:\\Program Files\\Amazon\\AWSCLIV2\\aws.exe','C:\\Program Files\\Amazon\\AWSCLI\\bin\\aws.exe','C:\\Program Files (x86)\\Amazon\\AWSCLI\\bin\\aws.exe') | Where-Object {{ Test-Path $_ }} | Select-Object -First 1
+  if (-not $awsCli) {{ $awsCli = (Get-Command aws -ErrorAction SilentlyContinue).Source }}
   if ($awsCli) {{
     $env:AWS_DEFAULT_REGION = $s3Region
     Write-Host "Downloading s3://$s3Bucket/$s3Key via CLI..."
-    $s3Out = & $awsCli s3 cp "s3://$s3Bucket/$s3Key" $zipPath --no-progress --region $s3Region 2>&1 | Out-String
-    $s3Exit = $LASTEXITCODE
-    if ($s3Out) {{ Write-Host $s3Out }}
-    if (($s3Exit -eq 0) -and (Test-Path $zipPath)) {{
-      $downloaded = $true
-      Write-Host 'Downloaded via AWS CLI.'
-    }} else {{
-      Write-Host "AWS CLI download failed (exit code $s3Exit)."
-    }}
-  }} else {{
-    Write-Host '  AWS CLI not found in any known location.'
+    & $awsCli s3 cp "s3://$s3Bucket/$s3Key" $zipPath --no-progress --region $s3Region 2>&1 | Out-String | Write-Host
+    if (($LASTEXITCODE -eq 0) -and (Test-Path $zipPath)) {{ $downloaded = $true; Write-Host 'Downloaded via AWS CLI.' }}
   }}
 }}
 
 if (-not $downloaded) {{
-  # List what IS available for diagnostics
-  Write-Host '--- Diagnostics ---'
-  Write-Host 'Available AWS modules:'
   Get-Module -ListAvailable -Name AWS* | Select-Object Name, Version | Format-Table -AutoSize | Out-String | Write-Host
-  Write-Host 'Files under C:\\Program Files\\Amazon\\'
-  if (Test-Path 'C:\\Program Files\\Amazon') {{
-    Get-ChildItem 'C:\\Program Files\\Amazon' -Recurse -Depth 2 | Select-Object FullName | Out-String | Write-Host
-  }} else {{
-    Write-Host '  Directory does not exist.'
-  }}
   Stop-Transcript
   throw "Failed to download s3://$s3Bucket/$s3Key - no working download method found."
 }}
@@ -416,6 +375,10 @@ if (-not (Test-Path $logDir)) {{ New-Item -ItemType Directory -Path $logDir -For
 & $nssmExe set TodoApp AppStderr "$logDir\\stderr.log"
 & $nssmExe set TodoApp AppRotateFiles 1
 & $nssmExe set TodoApp Start SERVICE_AUTO_START
+
+# Ensure TodoApp starts *after* datadogagent on reboot so dd-trace can connect.
+sc.exe config TodoApp depend= datadogagent
+Write-Host 'Service dependency set: TodoApp depends on datadogagent.'
 
 Write-Host 'Starting TodoApp service...'
 & $nssmExe start TodoApp
