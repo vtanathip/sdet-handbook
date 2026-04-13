@@ -1,0 +1,7 @@
+name: perf-test-env
+runtime:
+  name: python
+  options:
+    toolchain: uv
+    virtualenv: .venv-pulumi
+description: Dedicated Performance Testing Environment on AWS with Datadog monitoring

@@ -1,0 +1,32 @@
+# Pulumi Configuration Template for Development Stack
+# 
+# Copy this file to Pulumi.dev.yaml and fill in your actual values:
+#   cp Pulumi.dev.yaml.example Pulumi.dev.yaml
+#
+# DO NOT COMMIT Pulumi.dev.yaml - it contains secrets!
+# Use 'pulumi config set --secret' to manage secrets instead.
+
+config:
+  aws:region: us-east-1
+  perf-test-env:dd-api-key:
+    secure: SET_VIA_COMMAND_LINE
+  perf-test-env:rds-password:
+    secure: SET_VIA_COMMAND_LINE
+
+# Setup Instructions:
+# ==================
+# 1. Initialize the stack:
+#    pulumi stack select dev  (or pulumi stack init dev)
+#
+# 2. Set required secrets:
+#    pulumi config set --secret dd-api-key "YOUR_DATADOG_API_KEY"
+#    pulumi config set --secret rds-password "YOUR_SECURE_DB_PASSWORD"
+#
+# 3. Optionally set repository URL (defaults to sdet-handbook):
+#    pulumi config set repo-url "https://github.com/YOUR_ORG/YOUR_REPO.git"
+#
+# 4. Verify configuration:
+#    pulumi config
+#
+# 5. Deploy:
+#    pulumi up
