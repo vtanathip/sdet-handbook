@@ -4,3 +4,4 @@ config:
     secure: AAABALBwHey+9kyX6jMzvxX+Plf9rjBasfrZnV5H3ZAT5XGAYfenN/SDhR+pS29iXfbmOi+ZkoDO4S+ghzlPvg==
   perf-test-env:rds-password:
     secure: AAABANSHB/uJjgVH3pX7zA8gLGbUMo1lFvqsDy5XZqvgFT4S9H2+97BihYAe
+  perf-test-env:dd-site: ap1.datadoghq.com

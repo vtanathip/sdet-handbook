@@ -11,6 +11,8 @@ const pool = new Pool({
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
+  // RDS uses self-signed certificates; skip verification for dev/perf-test
+  ssl: { rejectUnauthorized: false },
 });
 
 export default pool;

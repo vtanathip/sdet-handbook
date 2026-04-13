@@ -16,14 +16,47 @@ Usage:
 
 import pulumi
 import pulumi_aws as aws
+import pulumi_tls as tls
 
 from networking import NetworkOutputs
+
+
+def create_key_pair(public_key: str, tags: dict[str, str]) -> aws.ec2.KeyPair:
+    """Create an AWS EC2 key pair from an OpenSSH-format public key."""
+
+    return aws.ec2.KeyPair(
+        "app-host-keypair",
+        public_key=public_key,
+        tags={**tags, "Name": "perf-test-app-host-keypair"},
+    )
+
+
+def create_generated_key_pair(
+    tags: dict[str, str],
+) -> tuple[aws.ec2.KeyPair, pulumi.Output[str]]:
+    """Generate a fresh key pair for the stack and return the AWS resource plus private key PEM."""
+
+    private_key = tls.PrivateKey(
+        "app-host-private-key",
+        algorithm="RSA",
+        rsa_bits=4096,
+    )
+
+    key_pair = aws.ec2.KeyPair(
+        "app-host-keypair",
+        public_key=private_key.public_key_openssh,
+        tags={**tags, "Name": "perf-test-app-host-keypair"},
+    )
+
+    return key_pair, private_key.private_key_pem
 
 
 def create_instance(
     network: NetworkOutputs,
     userdata_script: pulumi.Output,
     tags: dict[str, str],
+    key_name: pulumi.Input[str] | None = None,
+    iam_instance_profile: pulumi.Input[str] | None = None,
 ) -> aws.ec2.Instance:
     """
     Resolve the latest Windows Server 2022 Full AMI, then create the EC2
@@ -54,6 +87,8 @@ def create_instance(
         "app-host",
         ami=windows_ami.id,
         instance_type="c5.xlarge",
+        key_name=key_name,
+        iam_instance_profile=iam_instance_profile,
         subnet_id=network["subnet"].id,
         vpc_security_group_ids=[network["security_group"].id],
         associate_public_ip_address=True,

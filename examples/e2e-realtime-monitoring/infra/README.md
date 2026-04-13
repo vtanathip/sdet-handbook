@@ -54,6 +54,11 @@ pulumi stack select dev
 pulumi config set --secret dd-api-key "YOUR_DATADOG_API_KEY"
 pulumi config set --secret rds-password "YOUR_SECURE_RDS_PASSWORD"
 
+# By default, the stack now generates a fresh EC2 key pair for the Windows host.
+# Optional overrides:
+# pulumi config set ec2-public-key "$(Get-Content $HOME/.ssh/id_ed25519.pub -Raw)"
+# pulumi config set ec2-key-pair-name "your-existing-keypair-name"
+
 # Optional: override default repository
 pulumi config set repo-url "https://github.com/vtanathip/sdet-ai-handbook.git"
 ```
@@ -75,6 +80,7 @@ pulumi up
 Pulumi will create:
 - VPC with public/private subnets across AZs
 - Security groups for EC2 and RDS
+- EC2 key pair for Windows RDP access (auto-generated unless overridden)
 - RDS PostgreSQL instance
 - EC2 Windows Server 2022 instance
 - All networking and IAM resources
@@ -85,9 +91,22 @@ Once deployment completes, get the IP:
 
 ```powershell
 pulumi stack output instance_public_ip
+pulumi stack output ec2_key_pair_name
+
+# When the stack auto-generates the key pair, save the private key locally
+# so you can use AWS Console -> Get password for the Administrator account.
+pulumi stack output ec2_private_key_pem --show-secrets | Set-Content -Path .\perf-test-app-host.pem -NoNewline
+
+# Quick check: the file should start with BEGIN RSA PRIVATE KEY
+Get-Content .\perf-test-app-host.pem -Head 2
 ```
 
 Open `http://<IP>:3001` in your browser.
+
+For RDP on Windows instances, `ec2_key_pair_name` is the AWS key pair name you
+use with **Get password** in the EC2 console to decrypt the initial
+`Administrator` password. If the stack generated the key pair, use the saved
+`perf-test-app-host.pem` file in the **Get password** dialog.
 
 ## File Structure
 
