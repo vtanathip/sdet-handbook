@@ -2,6 +2,7 @@ param(
     [ValidateSet('local', 'ec2', 'all')]
     [string]$Target = 'local',
     [string]$Ec2BaseUrl = '',
+    [string]$RunId = '',
     [switch]$SkipTests,
     [switch]$Silent
 )
@@ -87,6 +88,12 @@ function Wait-ForUrl {
     throw "$Name did not become ready in time: $Url"
 }
 
+function New-RunId {
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $suffix = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    return "pw-$timestamp-$suffix"
+}
+
 if (($Target -eq 'ec2' -or $Target -eq 'all') -and [string]::IsNullOrWhiteSpace($Ec2BaseUrl)) {
     throw 'Ec2BaseUrl is required when Target is ec2 or all.'
 }
@@ -94,6 +101,7 @@ if (($Target -eq 'ec2' -or $Target -eq 'all') -and [string]::IsNullOrWhiteSpace(
 $shell = Get-ShellPath
 $serverPid = $null
 $clientPid = $null
+$effectiveRunId = if ([string]::IsNullOrWhiteSpace($RunId)) { New-RunId } else { $RunId }
 
 $requiresLocalStack = $Target -ne 'ec2'
 
@@ -119,7 +127,7 @@ if ($requiresLocalStack) {
 
     $escapedAppDir = $appDir.Replace("'", "''")
     $serverCommand = @"
-`$env:PGHOST='localhost'; `$env:PGPORT='5432'; `$env:PGDATABASE='todos'; `$env:PGUSER='todos'; `$env:PGPASSWORD='todos'; Set-Location '$escapedAppDir'; npm run dev:server
+`$env:PGHOST='localhost'; `$env:PGPORT='5432'; `$env:PGDATABASE='todos'; `$env:PGUSER='todos'; `$env:PGPASSWORD='todos'; `$env:DD_SERVICE='todo-api'; `$env:DD_ENV='perf-test'; `$env:DD_VERSION='1.0.0'; `$env:DD_TRACE_AGENT_URL='http://127.0.0.1:8126'; Set-Location '$escapedAppDir'; npm run dev:server
 "@
 
     if ($Silent) {
@@ -158,12 +166,15 @@ $state = [ordered]@{
     backendPid  = $serverPid
     frontendPid = $clientPid
     ec2BaseUrl  = $Ec2BaseUrl
+    runId       = $effectiveRunId
 }
 $state | ConvertTo-Json | Set-Content -Path $statePath -Encoding UTF8
 
 if ($SkipTests) {
     Write-Host ''
     Write-Host 'Services are up. Tests were skipped.' -ForegroundColor Green
+    Write-Host "Suggested E2E run id: $effectiveRunId" -ForegroundColor DarkGray
+    Write-Host "Manual test run: `$env:E2E_RUN_ID='$effectiveRunId'; cd app; npm run test:e2e" -ForegroundColor Gray
     Write-Host 'Run tests manually from app/: npm run test:e2e' -ForegroundColor Gray
     if ($Silent) {
         Write-Host "Silent logs: $logDir" -ForegroundColor Gray
@@ -183,6 +194,8 @@ try {
         $playwrightReporterArgs = @('--', '--reporter=dot')
     }
 
+    $env:E2E_RUN_ID = $effectiveRunId
+
     if ($Target -eq 'local') {
         npm run test:e2e @playwrightReporterArgs
     }
@@ -200,9 +213,20 @@ try {
     }
 
     Write-Host ''
+    Write-Host 'Validating local Datadog trace intake...' -ForegroundColor Cyan
+    & (Join-Path $root 'check-traces.ps1') -RunId $effectiveRunId
+    if ($LASTEXITCODE -ne 0) {
+        throw "check-traces.ps1 failed with exit code $LASTEXITCODE"
+    }
+
+    Write-Host ''
     Write-Host 'E2E flow completed successfully.' -ForegroundColor Green
+    Write-Host "Datadog run id: $effectiveRunId" -ForegroundColor Green
+    Write-Host "Datadog search: service:todo-api @e2e.run_id:$effectiveRunId" -ForegroundColor Gray
+    Write-Host 'Datadog ready: local trace validation passed.' -ForegroundColor Green
 }
 finally {
+    Remove-Item Env:E2E_RUN_ID -ErrorAction SilentlyContinue
     Pop-Location
     if ($Silent) {
         Write-Host "Silent logs: $logDir" -ForegroundColor Gray

@@ -2,6 +2,9 @@ import { Pool } from 'pg';
 
 // pg reads PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD from the environment.
 // All five are set as Machine-level env vars by the Pulumi userdata script.
+// Use SSL when explicitly opted-in (EC2/RDS) but not for local Docker Postgres.
+const sslConfig = process.env.PGSSL === 'true' ? { rejectUnauthorized: false } : false;
+
 const pool = new Pool({
   host: process.env.PGHOST,
   port: parseInt(process.env.PGPORT ?? '5432', 10),
@@ -11,8 +14,7 @@ const pool = new Pool({
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
-  // RDS uses self-signed certificates; skip verification for dev/perf-test
-  ssl: { rejectUnauthorized: false },
+  ssl: sslConfig,
 });
 
 export default pool;

@@ -165,6 +165,9 @@ The API logs these alongside Datadog trace IDs, so you can search in Datadog:
 # Start everything and run tests
 .\start-e2e.ps1
 
+# Start everything, run tests, and print a Datadog-ready trace check summary
+.\start-e2e.ps1 -RunId pw-demo-001
+
 # Start without running tests (keep services up for manual testing)
 .\start-e2e.ps1 -SkipTests
 
@@ -173,6 +176,12 @@ The API logs these alongside Datadog trace IDs, so you can search in Datadog:
 
 # Teardown
 .\stop-e2e.ps1
+
+# Validate local Datadog intake and print a Datadog search query
+.\check-traces.ps1 -RunId pw-demo-001
+
+# Optional: probe through the live API route instead of a direct tracer probe
+.\check-traces.ps1 -RunId pw-demo-001 -ProbeMode api
 ```
 
 ### Manual Start (Step by Step)

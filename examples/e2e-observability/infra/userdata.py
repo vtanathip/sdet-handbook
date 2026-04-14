@@ -70,6 +70,7 @@ Write-Host 'Setting system environment variables...'
 [Environment]::SetEnvironmentVariable('PGDATABASE',            'todos',          'Machine')
 [Environment]::SetEnvironmentVariable('PGUSER',                'todos',          'Machine')
 [Environment]::SetEnvironmentVariable('PGPASSWORD',            '{rds_password}', 'Machine')
+[Environment]::SetEnvironmentVariable('PGSSL',                 'true',           'Machine')
 [Environment]::SetEnvironmentVariable('NODE_ENV',              'production',     'Machine')
 [Environment]::SetEnvironmentVariable('PORT',                  '3001',           'Machine')
 
