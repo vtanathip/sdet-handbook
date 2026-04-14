@@ -1,0 +1,823 @@
+{
+  "title": "E2E Observability – Todo API",
+  "description": "Unified dashboard: APM request flow (Express → PostgreSQL), profiling hotspots, Node.js runtime, and Windows PDH host metrics.",
+  "layout_type": "ordered",
+  "template_variables": [
+    {
+      "name": "env",
+      "prefix": "env",
+      "default": "perf-test",
+      "available_values": []
+    },
+    {
+      "name": "service",
+      "prefix": "service",
+      "default": "todo-api",
+      "available_values": []
+    }
+  ],
+  "widgets": [
+    {
+      "definition": {
+        "title": "APM – Request Flow",
+        "type": "group",
+        "show_title": true,
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Request Rate (hits/s)",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "sum:trace.express.request.hits{$service,$env}.as_count()",
+                  "display_type": "bars",
+                  "style": {
+                    "palette": "dog_classic"
+                  }
+                }
+              ],
+              "yaxis": {
+                "include_zero": true
+              }
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          },
+          {
+            "definition": {
+              "title": "Error Rate (errors/s)",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "sum:trace.express.request.errors{$service,$env}.as_count()",
+                  "display_type": "bars",
+                  "style": {
+                    "palette": "warm"
+                  }
+                }
+              ],
+              "yaxis": {
+                "include_zero": true
+              }
+            },
+            "layout": {
+              "x": 4,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          },
+          {
+            "definition": {
+              "title": "Apdex Score",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:trace.express.request.apdex{$service,$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "cool"
+                  }
+                }
+              ],
+              "yaxis": {
+                "min": "0",
+                "max": "1"
+              }
+            },
+            "layout": {
+              "x": 8,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "APM – Latency Breakdown (Express → PostgreSQL)",
+        "type": "group",
+        "show_title": true,
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Overall Latency – p50 / p75 / p95 / p99",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "p50:trace.express.request{$service,$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "cool"
+                  }
+                },
+                {
+                  "q": "p75:trace.express.request{$service,$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "cool"
+                  }
+                },
+                {
+                  "q": "p95:trace.express.request{$service,$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "warm"
+                  }
+                },
+                {
+                  "q": "p99:trace.express.request{$service,$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "warm"
+                  }
+                }
+              ],
+              "yaxis": {
+                "include_zero": true
+              }
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 3
+            }
+          },
+          {
+            "definition": {
+              "title": "Database (pg) Query Latency – p50 / p95 / p99",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "p50:trace.pg.query{$service,$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "purple"
+                  }
+                },
+                {
+                  "q": "p95:trace.pg.query{$service,$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "orange"
+                  }
+                },
+                {
+                  "q": "p99:trace.pg.query{$service,$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "red"
+                  }
+                }
+              ],
+              "yaxis": {
+                "include_zero": true
+              }
+            },
+            "layout": {
+              "x": 6,
+              "y": 0,
+              "width": 6,
+              "height": 3
+            }
+          },
+          {
+            "definition": {
+              "title": "Time in Express vs Time in PostgreSQL",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:trace.express.request{$service,$env}",
+                  "display_type": "area",
+                  "style": {
+                    "palette": "cool"
+                  },
+                  "metadata": [
+                    {
+                      "expression": "avg:trace.express.request{$service,$env}",
+                      "alias_name": "Express total"
+                    }
+                  ]
+                },
+                {
+                  "q": "avg:trace.pg.query{$service,$env}",
+                  "display_type": "area",
+                  "style": {
+                    "palette": "purple"
+                  },
+                  "metadata": [
+                    {
+                      "expression": "avg:trace.pg.query{$service,$env}",
+                      "alias_name": "PostgreSQL query"
+                    }
+                  ]
+                }
+              ],
+              "yaxis": {
+                "include_zero": true
+              }
+            },
+            "layout": {
+              "x": 0,
+              "y": 3,
+              "width": 12,
+              "height": 3
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "APM – Endpoint Drill-Down",
+        "type": "group",
+        "show_title": true,
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Hits by Endpoint",
+              "title_size": "16",
+              "type": "toplist",
+              "requests": [
+                {
+                  "q": "sum:trace.express.request.hits{$service,$env} by {resource_name}.as_count()",
+                  "style": {
+                    "palette": "dog_classic"
+                  }
+                }
+              ]
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 4,
+              "height": 4
+            }
+          },
+          {
+            "definition": {
+              "title": "p95 Latency by Endpoint",
+              "title_size": "16",
+              "type": "toplist",
+              "requests": [
+                {
+                  "q": "p95:trace.express.request{$service,$env} by {resource_name}",
+                  "style": {
+                    "palette": "warm"
+                  }
+                }
+              ]
+            },
+            "layout": {
+              "x": 4,
+              "y": 0,
+              "width": 4,
+              "height": 4
+            }
+          },
+          {
+            "definition": {
+              "title": "Errors by Endpoint",
+              "title_size": "16",
+              "type": "toplist",
+              "requests": [
+                {
+                  "q": "sum:trace.express.request.errors{$service,$env} by {resource_name}.as_count()",
+                  "style": {
+                    "palette": "warm"
+                  }
+                }
+              ]
+            },
+            "layout": {
+              "x": 8,
+              "y": 0,
+              "width": 4,
+              "height": 4
+            }
+          },
+          {
+            "definition": {
+              "title": "Latency by Endpoint Over Time",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:trace.express.request{$service,$env} by {resource_name}",
+                  "display_type": "line"
+                }
+              ],
+              "yaxis": {
+                "include_zero": true
+              }
+            },
+            "layout": {
+              "x": 0,
+              "y": 4,
+              "width": 12,
+              "height": 3
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "Profiling – Function-Level Hotspots",
+        "type": "group",
+        "show_title": true,
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "type": "note",
+              "content": "⚠️ **Profiling flame graphs are only available in APM → Profiles → Explorer** (filter by `service:todo-api`). The metrics below show aggregated profiling data if `datadog.profiling.*` metrics are enabled on your plan.",
+              "background_color": "yellow",
+              "font_size": "14",
+              "text_align": "left",
+              "show_tick": false,
+              "tick_pos": "50%",
+              "tick_edge": "left"
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 1
+            }
+          },
+          {
+            "definition": {
+              "title": "Wall Time per Minute",
+              "title_size": "16",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "avg:datadog.profiling.node.wall_time.ns{$service,$env}",
+                  "aggregator": "avg"
+                }
+              ],
+              "precision": 0
+            },
+            "layout": {
+              "x": 0,
+              "y": 1,
+              "width": 4,
+              "height": 2
+            }
+          },
+          {
+            "definition": {
+              "title": "Heap Live Size",
+              "title_size": "16",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "avg:datadog.profiling.node.heap_live_size{$service,$env}",
+                  "aggregator": "avg"
+                }
+              ],
+              "precision": 0
+            },
+            "layout": {
+              "x": 4,
+              "y": 1,
+              "width": 4,
+              "height": 2
+            }
+          },
+          {
+            "definition": {
+              "title": "Profile Samples Sent",
+              "title_size": "16",
+              "type": "query_value",
+              "requests": [
+                {
+                  "q": "sum:datadog.profiling.node.profiles{$service,$env}",
+                  "aggregator": "sum"
+                }
+              ],
+              "precision": 0
+            },
+            "layout": {
+              "x": 8,
+              "y": 1,
+              "width": 4,
+              "height": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "Node.js Runtime Metrics",
+        "type": "group",
+        "show_title": true,
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "title": "Event Loop Delay (avg)",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:runtime.node.event_loop.delay.avg{$service,$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "cool"
+                  }
+                }
+              ],
+              "yaxis": {
+                "include_zero": true
+              }
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          },
+          {
+            "definition": {
+              "title": "Heap Used vs Total",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:runtime.node.mem.heap_used{$service,$env}",
+                  "display_type": "line",
+                  "metadata": [
+                    {
+                      "expression": "avg:runtime.node.mem.heap_used{$service,$env}",
+                      "alias_name": "Heap Used"
+                    }
+                  ]
+                },
+                {
+                  "q": "avg:runtime.node.mem.heap_total{$service,$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "grey"
+                  },
+                  "metadata": [
+                    {
+                      "expression": "avg:runtime.node.mem.heap_total{$service,$env}",
+                      "alias_name": "Heap Total"
+                    }
+                  ]
+                }
+              ],
+              "yaxis": {
+                "include_zero": true
+              }
+            },
+            "layout": {
+              "x": 4,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          },
+          {
+            "definition": {
+              "title": "GC Pause (avg)",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:runtime.node.gc.pause.avg{$service,$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "orange"
+                  }
+                }
+              ],
+              "yaxis": {
+                "include_zero": true
+              }
+            },
+            "layout": {
+              "x": 8,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          },
+          {
+            "definition": {
+              "title": "Active Handles & Requests",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:runtime.node.active_handles{$service,$env}",
+                  "display_type": "line",
+                  "metadata": [
+                    {
+                      "expression": "avg:runtime.node.active_handles{$service,$env}",
+                      "alias_name": "Handles"
+                    }
+                  ]
+                },
+                {
+                  "q": "avg:runtime.node.active_requests{$service,$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "warm"
+                  },
+                  "metadata": [
+                    {
+                      "expression": "avg:runtime.node.active_requests{$service,$env}",
+                      "alias_name": "Requests"
+                    }
+                  ]
+                }
+              ],
+              "yaxis": {
+                "include_zero": true
+              }
+            },
+            "layout": {
+              "x": 0,
+              "y": 3,
+              "width": 6,
+              "height": 3
+            }
+          },
+          {
+            "definition": {
+              "title": "Resident Set Size (RSS)",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:runtime.node.mem.rss{$service,$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "grey"
+                  }
+                }
+              ],
+              "yaxis": {
+                "include_zero": true
+              }
+            },
+            "layout": {
+              "x": 6,
+              "y": 3,
+              "width": 6,
+              "height": 3
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "Host – Windows PDH Counters",
+        "type": "group",
+        "show_title": true,
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "title": "CPU – % Processor Time (PDH)",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:cpu.percent_processor_time{$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "dog_classic"
+                  }
+                }
+              ],
+              "yaxis": {
+                "min": "0",
+                "max": "100"
+              },
+              "markers": [
+                {
+                  "value": "y = 80",
+                  "display_type": "error dashed",
+                  "label": "High CPU"
+                }
+              ]
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          },
+          {
+            "definition": {
+              "title": "Memory – Available MBytes (PDH)",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:memory.available_mbytes{$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "cool"
+                  }
+                }
+              ],
+              "yaxis": {
+                "include_zero": true
+              },
+              "markers": [
+                {
+                  "value": "y = 512",
+                  "display_type": "warning dashed",
+                  "label": "Low Memory"
+                }
+              ]
+            },
+            "layout": {
+              "x": 4,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          },
+          {
+            "definition": {
+              "title": "Disk – % Free Space (PDH)",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:disk.percent_free_space{$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "green"
+                  }
+                }
+              ],
+              "yaxis": {
+                "min": "0",
+                "max": "100"
+              },
+              "markers": [
+                {
+                  "value": "y = 10",
+                  "display_type": "error dashed",
+                  "label": "Low Disk"
+                }
+              ]
+            },
+            "layout": {
+              "x": 8,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "Host – System Metrics (DD Agent Built-in)",
+        "type": "group",
+        "show_title": true,
+        "layout_type": "ordered",
+        "widgets": [
+          {
+            "definition": {
+              "title": "CPU User + System %",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:system.cpu.user{$env}",
+                  "display_type": "area",
+                  "metadata": [
+                    {
+                      "expression": "avg:system.cpu.user{$env}",
+                      "alias_name": "User"
+                    }
+                  ]
+                },
+                {
+                  "q": "avg:system.cpu.system{$env}",
+                  "display_type": "area",
+                  "style": {
+                    "palette": "warm"
+                  },
+                  "metadata": [
+                    {
+                      "expression": "avg:system.cpu.system{$env}",
+                      "alias_name": "System"
+                    }
+                  ]
+                }
+              ],
+              "yaxis": {
+                "min": "0",
+                "max": "100"
+              }
+            },
+            "layout": {
+              "x": 0,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          },
+          {
+            "definition": {
+              "title": "Memory Usable %",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:system.mem.pct_usable{$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "cool"
+                  }
+                }
+              ],
+              "yaxis": {
+                "min": "0",
+                "max": "1"
+              }
+            },
+            "layout": {
+              "x": 4,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          },
+          {
+            "definition": {
+              "title": "Network I/O (bytes/s)",
+              "title_size": "16",
+              "type": "timeseries",
+              "requests": [
+                {
+                  "q": "avg:system.net.bytes_sent{$env}",
+                  "display_type": "line",
+                  "metadata": [
+                    {
+                      "expression": "avg:system.net.bytes_sent{$env}",
+                      "alias_name": "Sent"
+                    }
+                  ]
+                },
+                {
+                  "q": "avg:system.net.bytes_rcvd{$env}",
+                  "display_type": "line",
+                  "style": {
+                    "palette": "cool"
+                  },
+                  "metadata": [
+                    {
+                      "expression": "avg:system.net.bytes_rcvd{$env}",
+                      "alias_name": "Received"
+                    }
+                  ]
+                }
+              ],
+              "yaxis": {
+                "include_zero": true
+              }
+            },
+            "layout": {
+              "x": 8,
+              "y": 0,
+              "width": 4,
+              "height": 3
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
