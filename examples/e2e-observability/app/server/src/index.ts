@@ -24,6 +24,34 @@ const PORT = Number(process.env.PORT) || 3001;
 app.use(cors());
 app.use(express.json());
 
+// Attach E2E request metadata to active request spans for Datadog filtering.
+app.use((req, _res, next) => {
+  const activeSpan = tracer.scope().active();
+  if (!activeSpan) {
+    return next();
+  }
+
+  const runId = req.header('x-e2e-run-id');
+  const source = req.header('x-e2e-source');
+  const testName = req.header('x-e2e-test-name');
+  const requestId = req.header('x-e2e-request-id');
+
+  if (runId) {
+    activeSpan.setTag('e2e.run_id', runId);
+  }
+  if (source) {
+    activeSpan.setTag('e2e.source', source);
+  }
+  if (testName) {
+    activeSpan.setTag('e2e.test_name', testName);
+  }
+  if (requestId) {
+    activeSpan.setTag('e2e.request_id', requestId);
+  }
+
+  next();
+});
+
 // ── API routes ──────────────────────────────────────────────────────────────
 app.use('/api/todos', todosRouter);
 
