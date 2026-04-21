@@ -85,6 +85,15 @@ export class PageContextCapture {
         for (const child of Array.from(el.children)) {
           walk(child, depth + 1);
         }
+
+        // Traverse open shadow roots so AI can see shadow DOM elements
+        const shadow = (el as any).shadowRoot;
+        if (shadow) {
+          out.push(`${indent}  >> [shadow-root host="${tag}${id || testid || ''}"]`);
+          for (const child of Array.from(shadow.children) as any[]) {
+            walk(child, depth + 2);
+          }
+        }
       }
 
       walk(document.body, 0);

@@ -39,6 +39,7 @@ flowchart TD
     AE -->|"chart_click / chart_hover"| CH
     AE -->|"table actions"| TH
     AE -->|"frameSelector set"| IH
+    AE -->|"shadowHost set"| SH["shadow-dom\n(chained locators)"]
     F --> QR
 ```
 
@@ -55,11 +56,24 @@ flowchart TD
 | `src/executor/chart-handler.ts` | Specialised actions for SVG/canvas chart interactions |
 | `src/executor/table-handler.ts` | Scroll, search, and interact with data tables |
 | `src/executor/iframe-handler.ts` | Resolves elements inside iframes |
+| `src/executor/action-executor.ts` _(shadow DOM)_ | When `shadowHost` is set, chains `locator(host).locator(inner)` to pierce shadow boundaries |
 | `src/cache/locator-cache.ts` | Caches AI-resolved selectors to avoid redundant API calls |
 | `src/utils/dom-serializer.ts` | Strips the live DOM down to a token-safe HTML snapshot |
 | `src/utils/screenshot.ts` | Captures a base64 screenshot for vision calls |
 | `src/reporter/quality-reporter.ts` | Post-run AI quality metrics (confidence, retry rate, step timings) |
 | `config/index.ts` | Single config — `BASE_URL`, `TEST_USER_EMAIL`, `TEST_USER_PASSWORD` |
+
+## Shadow DOM
+
+Applications built with Web Components often hide their internals in shadow roots. The framework handles these automatically:
+
+1. **DOM capture** — `dom-serializer` traverses open shadow roots and emits a `>> [shadow-root host="tag#id"]` marker in the snapshot, making shadow children visible to the AI alongside regular DOM elements.
+
+2. **AI resolution** — the DOM resolver prompt instructs the model to set `shadowHost` (the host element's CSS selector) and `locatorStrategy: "pierce"` whenever the target element appears beneath a `[shadow-root]` marker.
+
+3. **Execution** — `action-executor` detects `shadowHost` and chains `page.locator(shadowHost).locator(innerLocator)`, which Playwright uses to cross the shadow boundary.
+
+> Only **open** shadow roots are accessible. Closed shadow roots (`{ mode: 'closed' }`) are not reachable from JavaScript and will fall back to vision-based resolution if the classifier flags `needsVision=true`.
 
 ## Cost
 

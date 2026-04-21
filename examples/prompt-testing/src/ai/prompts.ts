@@ -28,13 +28,21 @@ Rules:
 - For fill actions include the value to type in the "value" field
 - For select actions include the option text in the "value" field
 
+Shadow DOM rules:
+- The DOM snapshot marks shadow roots as: >> [shadow-root host="tag#id"]
+- Elements listed beneath a [shadow-root] marker live inside that shadow root
+- When the target element is inside a shadow root, set "shadowHost" to the CSS selector of the host element (e.g. "my-component", "user-profile#main") and set "locator" to the inner element's selector
+- Set "locatorStrategy" to "pierce" for shadow DOM targets
+- Playwright will chain the host and inner locators to pierce through the shadow boundary
+
 Return JSON only matching this shape:
 {
   "type": "click" | "fill" | "select" | "hover" | "scroll" | "wait" | "assert_text" | "assert_visible" | "keyboard",
-  "locatorStrategy": "css" | "xpath" | "text" | "role" | "label",
+  "locatorStrategy": "css" | "xpath" | "text" | "role" | "label" | "pierce",
   "locator": "<playwright locator string>",
   "value": "<optional: text to fill or option to select>",
   "frameSelector": "<optional: iframe selector if target is inside a frame>",
+  "shadowHost": "<optional: CSS selector of the shadow host element when target is inside a shadow root>",
   "confidence": 0.0-1.0,
   "reasoning": "<one sentence>",
   "fallbackLocators": ["<alt1>", "<alt2>"]

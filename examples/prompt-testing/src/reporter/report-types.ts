@@ -14,11 +14,13 @@ export type ActionType =
 
 export interface ResolvedAction {
   type: ActionType;
-  locatorStrategy: 'css' | 'xpath' | 'text' | 'role' | 'label' | 'coordinates';
+  locatorStrategy: 'css' | 'xpath' | 'text' | 'role' | 'label' | 'coordinates' | 'pierce';
   locator: string;
   value?: string;
   /** Set when the target element lives inside an iframe */
   frameSelector?: string;
+  /** CSS selector of the shadow host element when the target is inside a shadow root */
+  shadowHost?: string;
   /** Used for canvas/chart pixel-level interactions */
   coordinates?: { x: number; y: number };
   /** 0–1 confidence score from the model */

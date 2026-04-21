@@ -35,6 +35,10 @@ export class ActionExecutor {
     const root = action.frameSelector
       ? IframeHandler.resolve(this.page, action.frameSelector)
       : this.page;
+
+    if (action.shadowHost) {
+      return root.locator(action.shadowHost).locator(action.locator).first();
+    }
     return root.locator(action.locator).first();
   }
 
