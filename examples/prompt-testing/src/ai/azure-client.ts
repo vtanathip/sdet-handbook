@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import '../instrumentation.js';
 import { AzureOpenAI } from 'openai';
 
 const endpoint = process.env.AZURE_OPENAI_ENDPOINT!;

@@ -96,6 +96,44 @@ Every test step makes 2–3 API calls depending on element complexity.
 - `locator-cache` skips AI entirely for repeated steps on the same URL
 - GPT-4o vision is only used when the classifier flags `needsVision=true` or DOM confidence drops below `AI_CONFIDENCE_THRESHOLD` (default 0.6)
 
+## Observability
+
+Every AI call is traced automatically via [Arize Phoenix](https://github.com/arize-ai/phoenix) + OpenTelemetry. You get full visibility into prompts, completions, token usage, latency, and confidence per test step.
+
+```mermaid
+flowchart LR
+    AE["azure-client\n(OpenAI calls)"]
+    OT["OpenTelemetry\ninstrumentation"]
+    PH["Phoenix\nlocalhost:6006"]
+
+    AE -->|"auto-instrumented"| OT
+    OT -->|"OTLP /v1/traces"| PH
+```
+
+**What you see in Phoenix per test run:**
+
+- Each `chatMini` / `chatFull` call as a span with input prompt and output
+- Token counts (input / output / total) per step
+- Latency per AI call
+- Full conversation history — useful for debugging why the AI picked the wrong locator
+
+**Start Phoenix locally:**
+
+```bash
+docker compose up -d
+```
+
+Then open **[http://localhost:6006](http://localhost:6006)** — traces appear as soon as tests run.
+
+**Configuration:**
+
+```bash
+# .env — override if Phoenix is remote
+PHOENIX_ENDPOINT=http://localhost:6006
+```
+
+The instrumentation is in `src/instrumentation.ts` and is loaded automatically when `azure-client.ts` is imported.
+
 ## Setup
 
 ```bash

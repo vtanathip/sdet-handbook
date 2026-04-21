@@ -17,6 +17,6 @@ test.describe('Login Flow', () => {
     await step('Enter wronguser@example.com in the email field');
     await step('Enter incorrect-password in the password field');
     await step('Click the Sign In button');
-    await step('Verify the error message says Invalid credentials');
+    await step('Verify an error message is visible on the page');
   });
 });

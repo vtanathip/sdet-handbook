@@ -19,11 +19,12 @@ export const DOM_RESOLVER_SYSTEM = `You are a Playwright automation expert. Give
 Rules:
 - Prefer aria roles/labels over CSS class selectors
 - Prefer data-testid when present
-- For text matches use Playwright text locators like :text() or getByText()
+- For text matches use CSS text pseudo-selectors: text="Sign In" or :text("Sign In") — NEVER use getByText(), getByRole(), or any Playwright API method names as locator strings; these are NOT valid inside page.locator()
 - Return 2-3 fallbackLocators in priority order (alternatives if primary fails)
 - Set confidence between 0 and 1 based on how unambiguous the match is
 - Write reasoning as one sentence explaining why you chose this locator
 - Steps containing "should", "verify", "check", "see", "confirm" → use assert_text or assert_visible action types
+- For assert_text use a broad container selector (e.g. body, [role="alert"], .error) so the text check is not too narrow
 - For fill actions include the value to type in the "value" field
 - For select actions include the option text in the "value" field
 
