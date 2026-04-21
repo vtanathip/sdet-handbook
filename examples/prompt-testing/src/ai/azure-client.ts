@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { AzureOpenAI } from '@azure/openai';
+import { AzureOpenAI } from 'openai';
 
 const endpoint = process.env.AZURE_OPENAI_ENDPOINT!;
 const apiKey = process.env.AZURE_OPENAI_API_KEY!;

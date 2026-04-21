@@ -6,7 +6,9 @@
   "scripts": {
     "test": "playwright test",
     "test:headed": "playwright test --headed",
-    "test:ui": "playwright test --ui"
+    "test:ui": "playwright test --ui",
+    "test:login": "playwright test tests/login.spec.ts",
+    "test:login:headed": "playwright test tests/login.spec.ts --headed"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",
@@ -15,6 +17,7 @@
   },
   "dependencies": {
     "@azure/openai": "^2.0.0",
-    "dotenv": "^16.0.0"
+    "dotenv": "^16.0.0",
+    "openai": "^6.34.0"
   }
 }
