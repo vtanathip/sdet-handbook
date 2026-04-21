@@ -1,14 +1,12 @@
 import { test } from '../src/fixtures/nl-test.fixture.js';
-import { config } from '../config/environments.js';
-import { accounts } from '../config/test-accounts.js';
+import { config } from '../config/index.js';
 
 test.describe('Dashboard Charts', () => {
   test.beforeEach(async ({ page, step }) => {
-    await page.goto(config.baseUrl + config.loginPath);
-    await step(`Enter ${accounts.admin.email} in the email field`);
-    await step(`Enter ${accounts.admin.password} in the password field`);
+    await page.goto(config.baseUrl);
+    await step(`Enter ${config.user.email} in the email field`);
+    await step(`Enter ${config.user.password} in the password field`);
     await step('Click the Sign In button');
-    await page.goto(config.baseUrl + config.dashboardPath);
   });
 
   test('hover over bar chart data point', async ({ step }) => {
