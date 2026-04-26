@@ -17,7 +17,9 @@ The only API that test specs interact with. Accepts a plain-English instruction 
 step("Enter email in the email field")
     │
     ├─ 1. cache.get(text, url)
-    │       ├─ HIT  ──► executor.execute(cached) ──► success? ──► attach result ──► done
+    │       ├─ HIT  ──► writeDomSnapshot()     (if DOM_SNAPSHOT=true)
+    │       │       ──► writeDomDebug()         (if DOM_DEBUG=true)
+    │       │       ──► executor.execute(cached) ──► success? ──► attach result ──► done
     │       │                                              └─ stale? ──► continue to AI
     │       └─ MISS ──► continue to AI
     │
@@ -27,10 +29,17 @@ step("Enter email in the email field")
     ├─ 3. ActionResolver.resolve(text, context, page)
     │       └─ ResolvedAction { type, locator, value, confidence, ... }
     │
-    ├─ 4. ActionExecutor.execute(resolved)
+    ├─ 4. writeDomSnapshot(page, stepIndex, text, resolved)   (if DOM_SNAPSHOT=true)
+    │       └─ results/dom-snapshots/step-NN-<text>.txt
+    │
+    ├─ 5. writeDomDebug(page, stepIndex, text, resolved)      (if DOM_DEBUG=true)
+    │       └─ results/dom-debug/step-NN-<text>.{png,html,json}
+    │
+    ├─ 6. ActionExecutor.execute(resolved)
+    │       ├─ highlightElement() overlay shown  (if DOM_HIGHLIGHT=true)
     │       └─ Playwright interaction on live browser
     │
-    └─ 5. Attach StepResult JSON ──► QualityReporter consumes this after the run
+    └─ 7. Attach StepResult JSON ──► QualityReporter consumes this after the run
              └─ throw on error: 'Step failed: "<text>" — <error>'
 ```
 

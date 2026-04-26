@@ -34,6 +34,9 @@ graph TD
     EXECUTOR["⚙️ Action Executor\nPlaywright calls"]
     REPORTER["📊 Quality Reporter\nJSON reports"]
     PHOENIX["🔭 Arize Phoenix\nOTel traces"]
+    HIGHLIGHT["🟠 DOM Highlight\noverlay on element"]
+    SNAPSHOT["📄 DOM Snapshot Writer\nfull tree + travel path"]
+    DEBUGW["🐛 DOM Debug Writer\nscreenshot · HTML · JSON"]
 
     SPEC -->|"await step(text)"| FIXTURE
     FIXTURE -->|"cache hit?"| CACHE
@@ -44,7 +47,10 @@ graph TD
     CLASSIFIER -->|"needsVision=true\nor chart/canvas"| VISION_AI
     DOM_AI -->|"low confidence"| VISION_AI
     RESOLVER -->|"ResolvedAction"| FIXTURE
+    FIXTURE -->|"before execute"| SNAPSHOT
+    FIXTURE -->|"before execute"| DEBUGW
     FIXTURE -->|"execute"| EXECUTOR
+    EXECUTOR -->|"before dispatch"| HIGHLIGHT
     EXECUTOR -->|"StepResult attachment"| REPORTER
     RESOLVER -->|"auto-instrumented spans"| PHOENIX
 ```
@@ -58,7 +64,8 @@ flowchart TD
     A([step called with plain-English text]) --> B{Cache hit?}
 
     B -->|Yes| C[Use cached ResolvedAction]
-    C --> D[Execute via Playwright]
+    C --> CE[writeDomSnapshot + writeDomDebug]
+    CE --> D[Execute via Playwright\n+ highlightElement overlay]
     D --> E{Success?}
     E -->|Yes| Z([✅ Done — attach StepResult])
     E -->|No — stale locator| F
@@ -77,7 +84,8 @@ flowchart TD
     M --> K
 
     K --> N[Write to cache]
-    N --> D
+    N --> NE[writeDomSnapshot + writeDomDebug]
+    NE --> D
 ```
 
 ---
@@ -187,6 +195,8 @@ graph TD
     RUN --> QR["results/quality-report.json\nAI confidence per step\nlocator strategy used"]
     RUN --> TR["results/time-report.json\nstep durations\ncache hit rate\nslowest step"]
     RUN --> OTEL["Arize Phoenix\nfull prompt traces\ntoken costs"]
+    RUN --> DS["results/dom-snapshots/\nstep-NN-*.txt\nfull DOM tree + travel path\n(DOM_SNAPSHOT=true)"]
+    RUN --> DD["results/dom-debug/\nstep-NN-*.png  annotated screenshot\nstep-NN-*.html  full page HTML\nstep-NN-*.json  element attributes\n(DOM_DEBUG=true)"]
 ```
 
 ---
@@ -204,3 +214,8 @@ graph TD
 | `AI_MAX_RETRIES` | Retry attempts per step | `2` |
 | `DOM_MAX_TOKENS` | Token budget for DOM snapshot | `4000` |
 | `PHOENIX_ENDPOINT` | Arize Phoenix OTel endpoint | `http://localhost:6006` |
+| `DOM_HIGHLIGHT` | Show pulsing orange overlay before each action | `false` |
+| `DOM_HIGHLIGHT_PAUSE` | ms to pause before action so recording captures the highlight | `800` |
+| `DOM_HIGHLIGHT_DURATION` | ms the overlay stays visible | `2000` |
+| `DOM_SNAPSHOT` | Write full DOM tree + element travel path per step | `false` |
+| `DOM_DEBUG` | Write annotated screenshot + HTML + element JSON per step | `false` |

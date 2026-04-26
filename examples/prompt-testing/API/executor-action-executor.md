@@ -1,7 +1,7 @@
 # src/executor/action-executor.ts
 
 ## Purpose
-Executes a `ResolvedAction` against the live Playwright page. Handles frame resolution, shadow DOM piercing, fallback locators, and chart/canvas delegation.
+Executes a `ResolvedAction` against the live Playwright page. Handles frame resolution, shadow DOM piercing, fallback locators, chart/canvas delegation, and pre-action DOM highlighting.
 
 ## Class: `ActionExecutor`
 
@@ -14,13 +14,19 @@ new ActionExecutor(page: Page)
 Main dispatch method.
 
 **Decision tree:**
-1. If `action.type === 'chart_click'` or `'chart_hover'` → delegate to `ChartHandler`.
-2. Build the Playwright `Locator`:
-   - If `action.frameSelector` is set → resolve via `IframeHandler` first.
-   - If `action.shadowHost` is set → chain `page.locator(shadowHost).locator(locator)`.
-3. Call `dispatch(locator, action)`.
-4. On failure → iterate `action.fallbackLocators`, attempt each in order, return on first success.
-5. If all fallbacks fail → rethrow the original error.
+1. If `action.type === 'chart_click'` or `'chart_hover'` → delegate to `ChartHandler` (no highlight).
+2. Build the Playwright `Locator` via `resolveLocator(action)`.
+3. Call `highlightElement()` — injects an orange pulsing overlay so recordings show which element was targeted. Pauses `DOM_HIGHLIGHT_PAUSE` ms before proceeding (default 800ms). No-op if `DOM_HIGHLIGHT` is not `true`.
+4. Call `dispatch(locator, action)`.
+5. On failure → iterate `action.fallbackLocators`, attempt each in order, return on first success.
+6. If all fallbacks fail → rethrow the original error.
+
+### `resolveLocator(action: ResolvedAction): Locator` *(public)*
+Builds the Playwright `Locator` from a `ResolvedAction`. Public so that external utilities (e.g. `dom-debug-writer`) can resolve the same locator without re-implementing the logic.
+
+- If `action.frameSelector` is set → resolve root via `IframeHandler`.
+- If `action.shadowHost` is set → chain `root.locator(shadowHost).locator(locator).first()`.
+- Otherwise → `page.locator(locator).first()`.
 
 ## Action Types
 
