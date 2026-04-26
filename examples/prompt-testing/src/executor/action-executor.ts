@@ -2,6 +2,7 @@ import type { Page, Locator } from '@playwright/test';
 import type { ResolvedAction } from '../reporter/report-types.js';
 import { IframeHandler } from './iframe-handler.js';
 import { ChartHandler } from './chart-handler.js';
+import { highlightElement } from '../utils/dom-highlight.js';
 
 export class ActionExecutor {
   constructor(private readonly page: Page) {}
@@ -13,6 +14,7 @@ export class ActionExecutor {
     }
 
     const locator = this.resolveLocator(action);
+    await highlightElement(this.page, locator, action.type.toUpperCase());
 
     try {
       await this.dispatch(locator, action);
@@ -31,7 +33,7 @@ export class ActionExecutor {
     }
   }
 
-  private resolveLocator(action: ResolvedAction): Locator {
+  public resolveLocator(action: ResolvedAction): Locator {
     const root = action.frameSelector
       ? IframeHandler.resolve(this.page, action.frameSelector)
       : this.page;

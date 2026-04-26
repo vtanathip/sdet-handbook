@@ -8,8 +8,8 @@ export default defineConfig({
   retries: 1,
   use: {
     baseURL: process.env.BASE_URL,
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    screenshot: 'on',
+    video: 'on',
     headless: true,
   },
   reporter: [
@@ -20,7 +20,9 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'],
+        channel: 'chrome',
+      },
     },
   ],
 });

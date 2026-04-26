@@ -4,6 +4,8 @@ import { LocatorCache } from '../cache/locator-cache.js';
 import { ActionResolver } from '../ai/action-resolver.js';
 import { ActionExecutor } from '../executor/action-executor.js';
 import { PageContextCapture } from '../utils/dom-serializer.js';
+import { writeDomSnapshot } from '../utils/dom-snapshot-writer.js';
+import { writeDomDebug } from '../utils/dom-debug-writer.js';
 
 type NlFixtures = {
   /** Execute a natural-language test step against the current page */
@@ -29,6 +31,8 @@ export const test = base.extend<NlFixtures>({
       const cached = cache.get(text, page.url());
       if (cached) {
         try {
+          await writeDomSnapshot(page, stepIndex, text, cached);
+          await writeDomDebug(page, stepIndex, text, cached);
           await executor.execute(cached);
           resolved = cached;
           cacheHit = true;
@@ -42,6 +46,8 @@ export const test = base.extend<NlFixtures>({
         try {
           const context = await PageContextCapture.capture(page);
           resolved = await resolver.resolve(text, context, page);
+          await writeDomSnapshot(page, stepIndex, text, resolved);
+          await writeDomDebug(page, stepIndex, text, resolved);
           await executor.execute(resolved);
         } catch (e: unknown) {
           error = e instanceof Error ? e.message : String(e);
