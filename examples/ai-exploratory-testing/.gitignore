@@ -11,7 +11,7 @@ secrets.env
 *.secrets.env
 
 # Real configs with app URLs — always copy from the .example templates
-config.lseg.yaml
+config.prod.yaml
 config.local.yaml
 config.*.local.yaml
 

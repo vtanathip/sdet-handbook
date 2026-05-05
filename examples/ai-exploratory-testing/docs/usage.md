@@ -5,7 +5,7 @@
 - Node.js 20+
 - GitHub Copilot CLI installed and authenticated (`copilot` on PATH)
 - `playwright-cli` installed globally and available on PATH
-- Windows (daemon path resolves from `%LOCALAPPDATA%/ms-playwright/daemon`)
+- Windows, macOS, or Linux (daemon path is resolved automatically per platform)
 
 ## Install
 

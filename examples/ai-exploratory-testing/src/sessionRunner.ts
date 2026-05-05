@@ -1,7 +1,7 @@
 import {
   CopilotClient,
   CopilotSession,
-  approveAll,
+  type PermissionRequestResult,
   type SessionEvent,
 } from '@github/copilot-sdk';
 import { log } from './util/logger.js';
@@ -22,7 +22,11 @@ export class SessionRunner {
     const client = new CopilotClient();
     const session = await client.createSession({
       model: opts.model,
-      onPermissionRequest: approveAll,
+      // The CLI's interactive-response handler (cye) expects {kind:"approve-once"},
+      // NOT {kind:"approved"} (what the SDK's approveAll returns). Using approve-once
+      // causes cye to approve the tool call and return {kind:"approved"} internally.
+      onPermissionRequest: () =>
+        ({ kind: 'approve-once' }) as unknown as PermissionRequestResult,
       skillDirectories: opts.skillDirectories,
       systemMessage: { mode: 'append', content: opts.systemPrompt },
     });

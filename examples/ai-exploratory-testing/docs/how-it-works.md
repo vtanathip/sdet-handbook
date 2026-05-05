@@ -5,7 +5,10 @@
 `index.ts` is the CLI entry. It:
 1. Reads `--config <path>` from `process.argv` (defaults to `config.example.yaml`)
 2. Calls `loadConfig()` to parse and validate the YAML
-3. Resolves `daemonRoot` from `%LOCALAPPDATA%/ms-playwright/daemon` (Windows) or `$HOME/ms-playwright/daemon`
+3. Resolves `daemonRoot` per platform via `resolveDaemonRoot()`:
+   - **Windows**: `%LOCALAPPDATA%\ms-playwright\daemon`
+   - **macOS**: `~/Library/Application Support/ms-playwright/daemon`
+   - **Linux**: `$XDG_DATA_HOME/ms-playwright/daemon` (falls back to `~/.local/share/ms-playwright/daemon`)
 4. Calls `runOrchestration()` with the assembled options
 5. Calls `process.exit(0)` after `runOrchestration` returns to force-clear any dangling handles (CDP WebSocket, child stdio)
 

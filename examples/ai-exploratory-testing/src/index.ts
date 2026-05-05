@@ -10,11 +10,19 @@ function argFlag(name: string): string | undefined {
 const configPath = argFlag('config') ?? 'config.example.yaml';
 const config = loadConfig(configPath);
 
-const daemonRoot = join(
-  process.env.LOCALAPPDATA ?? process.env.HOME ?? '.',
-  'ms-playwright',
-  'daemon',
-);
+function resolveDaemonRoot(): string {
+  const home = process.env.HOME ?? '.';
+  if (process.platform === 'win32') {
+    return join(process.env.LOCALAPPDATA ?? join(home, 'AppData', 'Local'), 'ms-playwright', 'daemon');
+  }
+  if (process.platform === 'darwin') {
+    return join(home, 'Library', 'Application Support', 'ms-playwright', 'daemon');
+  }
+  // Linux
+  return join(process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'ms-playwright', 'daemon');
+}
+
+const daemonRoot = resolveDaemonRoot();
 
 await runOrchestration({
   config,

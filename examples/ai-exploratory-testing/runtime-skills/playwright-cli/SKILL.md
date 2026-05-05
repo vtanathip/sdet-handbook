@@ -1,7 +1,7 @@
 ---
 name: playwright-cli
 description: Automate browser interactions, test web pages and work with Playwright tests.
-allowed-tools: Bash(playwright-cli:*) Bash(npx:*) Bash(npm:*)
+allowed-tools: Bash(playwright-cli:*) Bash(npx:*) Bash(npm:*) PowerShell(playwright-cli:*) PowerShell(npx:*) PowerShell(npm:*)
 ---
 
 <!-- Audience: runtime agent — injected via SessionRunner skillDirectories at startup. Tuned for the exploratory testing agent, not for developer Copilot tooling. See .agents/skills/playwright-cli/ for the developer variant. -->
