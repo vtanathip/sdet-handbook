@@ -7,6 +7,12 @@
       "skillPath": "skills/engineering/improve-codebase-architecture/SKILL.md",
       "computedHash": "2da1d23b8f53cfe67f2e0b68924ab9f4ec400bb6480de097007eeaeb517d1722"
     },
+    "playwright-cli": {
+      "source": "microsoft/playwright-cli",
+      "sourceType": "github",
+      "skillPath": "skills/playwright-cli/SKILL.md",
+      "computedHash": "a07462654e72ec3b463aa0f3af744c320c57808505abe49e44845436e0050a1a"
+    },
     "systematic-debugging": {
       "source": "obra/superpowers",
       "sourceType": "github",
