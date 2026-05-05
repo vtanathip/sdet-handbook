@@ -1,0 +1,20 @@
+{
+  "name": "example-session",
+  "version": "1.60.0-alpha-2026-04-14",
+  "timestamp": 1776824421939,
+  "socketPath": "\\\\.\\pipe\\pw-example-sock",
+  "cli": {
+    "persistent": true
+  },
+  "browser": {
+    "browserName": "chromium",
+    "launchOptions": {
+      "headless": false,
+      "channel": "chrome",
+      "args": [
+        "--remote-debugging-port=54321"
+      ]
+    },
+    "userDataDir": "C:\\Users\\EXAMPLE\\AppData\\Local\\ms-playwright\\daemon\\abc123\\ud-example"
+  }
+}

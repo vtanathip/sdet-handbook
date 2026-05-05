@@ -1,0 +1,2 @@
+{"ts":"2026-04-22T10:20:00Z","severity":"high","title":"Chart never loads for GOOG","repro":"...","agentConfidence":"high"}
+{"ts":"2026-04-22T11:45:00Z","severity":"low","title":"Minor tooltip flicker","repro":"...","agentConfidence":"medium"}

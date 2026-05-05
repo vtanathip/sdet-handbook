@@ -1,0 +1,42 @@
+node_modules/
+runs/
+dist/
+*.log
+.env
+
+# Auth artifacts — never commit secrets or storage state
+*.auth.json
+*-auth.json
+secrets.env
+*.secrets.env
+
+# Real configs with app URLs — always copy from the .example templates
+config.lseg.yaml
+config.local.yaml
+config.*.local.yaml
+
+# Never commit template/example files — keep locally, share out-of-band
+*.example
+config.example.yaml
+
+# One-off history-scrub scripts
+.git-scrub-*.sh
+
+# Reference material (cloned separately for research only)
+refs/
+
+# playwright-cli daemon state / scratch
+.playwright-cli/
+
+# Editor
+.vscode/
+.idea/
+
+# Claude Code harness state
+.claude/
+
+# Graphify — intermediate pipeline files (re-generated on demand)
+# Keep GRAPH_REPORT.md and graph.html committed; ignore everything else
+graphify-out/.graphify_*
+graphify-out/graph.json
+graphify-out/cache/

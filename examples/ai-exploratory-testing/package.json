@@ -1,0 +1,29 @@
+{
+  "name": "ai-exploratory-testing",
+  "version": "1.0.0",
+  "description": "A playground for using AI agents to perform exploratory testing of web applications, using Playwright for browser automation and a custom agent orchestration framework.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "tsx src/index.ts",
+    "smoke": "tsx src/index.ts --config config.local.yaml",
+    "exploratory": "tsx src/index.ts --config config.prod.yaml"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  },
+  "dependencies": {
+    "@github/copilot-sdk": "^0.2.2",
+    "playwright": "^1.59.1",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
+  }
+}

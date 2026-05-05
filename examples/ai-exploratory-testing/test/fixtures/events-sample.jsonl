@@ -1,0 +1,9 @@
+{"ts":"2026-04-22T10:00:00Z","type":"session.usage_info","tokenLimit":200000,"currentTokens":5000,"isInitial":true}
+{"ts":"2026-04-22T10:14:59Z","type":"assistant.message","data":{"content":"Opened GOOG chart; 1D timeframe is default."}}
+{"ts":"2026-04-22T10:15:00Z","type":"session.idle","data":{}}
+{"ts":"2026-04-22T10:15:00Z","type":"session.task_complete","summary":"checked GOOG chart"}
+{"ts":"2026-04-22T10:30:00Z","type":"session.usage_info","tokenLimit":200000,"currentTokens":45000,"isInitial":false}
+{"ts":"2026-04-22T10:59:59Z","type":"assistant.message","data":{"content":"Switched to 1M view; chart re-rendered with denser candles."}}
+{"ts":"2026-04-22T11:00:00Z","type":"session.idle","data":{}}
+{"ts":"2026-04-22T11:00:00Z","type":"session.compaction_complete","success":true,"tokensBefore":160000,"tokensAfter":40000}
+{"ts":"2026-04-22T18:00:00Z","type":"session.shutdown","totalPremiumRequests":152}
