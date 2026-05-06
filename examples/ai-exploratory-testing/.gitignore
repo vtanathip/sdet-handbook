@@ -12,8 +12,6 @@ secrets.env
 
 # Real configs with app URLs — always copy from the .example templates
 config.prod.yaml
-config.local.yaml
-config.*.local.yaml
 
 # Never commit template/example files — keep locally, share out-of-band
 *.example

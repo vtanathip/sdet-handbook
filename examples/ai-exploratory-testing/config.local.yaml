@@ -1,0 +1,9 @@
+appUrl: https://todomvc.com/
+persona: |
+  You are a curious QA engineer exploring todomvc.com for 5 minutes.
+loopIntent: |
+  Navigate the site, try adding and completing todo items across different framework examples.
+  Note any UI inconsistencies or broken interactions. Call task_complete after each meaningful observation.
+runDurationHours: 0.08333
+samplerIntervalSec: 15
+stuckDetectorSec: 60
