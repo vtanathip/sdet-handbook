@@ -13,6 +13,7 @@ const base: Config = {
   runDurationHours: 1,
   samplerIntervalSec: 30,
   stuckDetectorSec: 120,
+  headed: false,
 };
 
 describe('resolveAuthMode', () => {

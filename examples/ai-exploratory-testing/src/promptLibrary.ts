@@ -54,7 +54,7 @@ export function buildFirstPrompt(cfg: Config, mode: AuthMode): string {
       return (
         `${base} First, restore the saved auth state: ` +
         `\`playwright-cli state-load ${cfg.authStateFile}\`. ` +
-        `Then \`playwright-cli open ${cfg.appUrl}\`. ` +
+        `Then \`playwright-cli open ${cfg.appUrl}${cfg.headed ? ' --headed' : ''}\`. ` +
         `You should already be logged in; verify with a snapshot. ` +
         `Emit task_complete when ready.`
       );
@@ -64,7 +64,7 @@ export function buildFirstPrompt(cfg: Config, mode: AuthMode): string {
         ? `Log in: ${hint}`
         : `Log in using whatever credentials are available (check PLAYWRIGHT_MCP_SECRETS_FILE for secret names).`;
       return (
-        `${base} \`playwright-cli open ${cfg.appUrl}\`, wait for load. ` +
+        `${base} \`playwright-cli open ${cfg.appUrl}${cfg.headed ? ' --headed' : ''}\`, wait for load. ` +
         `${loginStep} ` +
         `After login succeeds (you see a logged-in page), emit task_complete.`
       );
@@ -72,7 +72,7 @@ export function buildFirstPrompt(cfg: Config, mode: AuthMode): string {
     case 'no-auth':
     default:
       return (
-        `${base} \`playwright-cli open ${cfg.appUrl}\`, wait for load, ` +
+        `${base} \`playwright-cli open ${cfg.appUrl}${cfg.headed ? ' --headed' : ''}\`, wait for load, ` +
         `emit task_complete with a status summary.`
       );
   }

@@ -1,4 +1,5 @@
 appUrl: https://todomvc.com/
+headed: true
 persona: |
   You are a curious QA engineer exploring todomvc.com for 5 minutes.
 loopIntent: |

@@ -27,10 +27,10 @@ This uses `config.smoke.yaml`. Output is written to `runs/<timestamp>/`.
 
 ### 1. Create a config file
 
-Copy `config.smoke.yaml` as a starting point:
+Copy `config.local.yaml` as a starting point:
 
 ```bash
-cp config.smoke.yaml config.myapp.yaml
+cp config.local.yaml config.myapp.yaml
 ```
 
 Edit `config.myapp.yaml`:
@@ -133,6 +133,7 @@ Open `report.md` for the human-readable summary. Raw JSONL files are useful for 
 | `samplerIntervalSec` | no | `30` | CDP polling interval |
 | `stuckDetectorSec` | no | `120` | Seconds of silence before aborting the current agent turn |
 | `seedNotes` | no | — | Optional extra context injected into the system prompt |
+| `headed` | no | `false` | Open the browser in headed (visible) mode |
 | `authStateFile` | no | — | Path to Playwright storage state; enables auth modes |
 | `authLoginHint` | no | — | Login instructions for the agent (reference env var names, not values) |
 
@@ -144,4 +145,4 @@ Open `report.md` for the human-readable summary. Raw JSONL files are useful for 
 | `npm run test:watch` | `vitest` | Run tests in watch mode |
 | `npm run typecheck` | `tsc --noEmit` | Type-check without emitting |
 | `npm run start` | `tsx src/index.ts` | Run with default config |
-| `npm run smoke` | `tsx src/index.ts --config config.smoke.yaml` | 5-minute smoke run |
+| `npm run smoke` | `tsx src/index.ts --config config.local.yaml` | 5-minute smoke run |
