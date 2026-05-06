@@ -10,7 +10,7 @@ export const ConfigSchema = z.object({
   samplerIntervalSec: z.number().int().positive().default(30),
   stuckDetectorSec: z.number().int().positive().default(120),
   seedNotes: z.string().optional(),
-  headed: z.boolean().optional().default(false),
+  headed: z.boolean().optional(),
   authStateFile: z.string().optional(),
   authLoginHint: z.string().optional(),
 });

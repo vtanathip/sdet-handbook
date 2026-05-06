@@ -9,7 +9,6 @@ const base: Config = {
   runDurationHours: 8,
   samplerIntervalSec: 30,
   stuckDetectorSec: 120,
-  headed: false,
 };
 
 describe('buildSystemPrompt', () => {
