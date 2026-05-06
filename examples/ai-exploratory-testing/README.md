@@ -74,6 +74,7 @@ Credentials are read from a dotenv file pointed to by `PLAYWRIGHT_MCP_SECRETS_FI
 | Doc | Contents |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | Mermaid workflow diagram, module map, data flow sequences, output directory layout |
+| [docs/design-decisions.md](docs/design-decisions.md) | Why CDP, .session files, JSONL streams, stuck detector, auth mode, Zod, and runtime skills were chosen |
 | [docs/features.md](docs/features.md) | All key features explained: CDP monitoring, auth modes, stuck detector, runtime skills, report generation |
 | [docs/how-it-works.md](docs/how-it-works.md) | Module-by-module walkthrough of every source file |
 | [docs/testing.md](docs/testing.md) | How to run tests, test suite table, fixture guide, how to write new tests |
