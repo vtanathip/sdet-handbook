@@ -16,7 +16,7 @@ function resolveDaemonRoot(): string {
     return join(process.env.LOCALAPPDATA ?? join(home, 'AppData', 'Local'), 'ms-playwright', 'daemon');
   }
   if (process.platform === 'darwin') {
-    return join(home, 'Library', 'Application Support', 'ms-playwright', 'daemon');
+    return join(home, 'Library', 'Caches', 'ms-playwright', 'daemon');
   }
   // Linux
   return join(process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'ms-playwright', 'daemon');
