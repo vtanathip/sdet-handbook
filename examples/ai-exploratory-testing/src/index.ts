@@ -7,7 +7,7 @@ function argFlag(name: string): string | undefined {
   return idx >= 0 ? process.argv[idx + 1] : undefined;
 }
 
-const configPath = argFlag('config') ?? 'config.example.yaml';
+const configPath = argFlag('config') ?? 'config.local.yaml';
 const config = loadConfig(configPath);
 
 function resolveDaemonRoot(): string {

@@ -67,7 +67,7 @@ Credentials are read from a dotenv file pointed to by `PLAYWRIGHT_MCP_SECRETS_FI
 - Node.js 20+
 - GitHub Copilot CLI installed and authenticated
 - `playwright-cli` installed globally on PATH
-- Windows (`%LOCALAPPDATA%/ms-playwright/daemon` path)
+- Windows, macOS, or Linux
 
 ## Documentation
 
