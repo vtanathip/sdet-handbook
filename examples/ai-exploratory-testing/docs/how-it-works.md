@@ -3,7 +3,7 @@
 ## Entry Point — `src/index.ts`
 
 `index.ts` is the CLI entry. It:
-1. Reads `--config <path>` from `process.argv` (defaults to `config.example.yaml`)
+1. Reads `--config <path>` from `process.argv` (defaults to `config.local.yaml`)
 2. Calls `loadConfig()` to parse and validate the YAML
 3. Resolves `daemonRoot` per platform via `resolveDaemonRoot()`:
    - **Windows**: `%LOCALAPPDATA%\ms-playwright\daemon`
@@ -25,6 +25,7 @@
 | `samplerIntervalSec` | integer | `30` | CDP polling interval |
 | `stuckDetectorSec` | integer | `120` | Watchdog threshold before abort |
 | `seedNotes` | string | — | Optional seed context for the agent |
+| `headed` | boolean | — | Open the browser in headed (visible) mode |
 | `authStateFile` | string | — | Path to Playwright storage state file |
 | `authLoginHint` | string | — | Login instructions injected into first prompt |
 

@@ -21,7 +21,7 @@ Run a 5-minute exploratory session against TodoMVC:
 npm run smoke
 ```
 
-This uses `config.smoke.yaml`. Output is written to `runs/<timestamp>/`.
+This uses `config.local.yaml`. Output is written to `runs/<timestamp>/`.
 
 ## Run Against a Custom App
 
