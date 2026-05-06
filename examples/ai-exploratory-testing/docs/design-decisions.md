@@ -133,3 +133,82 @@ The agent needs to know how to use `playwright-cli` — its commands, options, a
 The Copilot SDK `skillDirectories` option injects documentation from a local directory into the session separately from the system prompt. The `runtime-skills/playwright-cli/` directory contains the same skill reference docs that `playwright-cli` itself publishes, plus references for element selection, request mocking, storage state, tracing, and video recording. The agent can consult these without them appearing in the user-visible conversation.
 
 This keeps the system prompt focused on _what to test_ (persona, app URL, loop intent) while the skill directory handles _how to operate the browser_.
+
+---
+
+## Orchestrator Design (`runCoordinator.ts`)
+
+### Overview
+
+`runOrchestration()` is a sequential state machine with five phases. It is not an AI model — it is a TypeScript function that owns the run lifecycle and wires every other module together.
+
+### Phase 1 — Setup
+
+```
+RunArtifacts.create()       output dir + three JSONL writers
+selfTestDaemon()            fast-fail if daemon files are missing
+SessionRunner.create()      CopilotClient + CopilotSession with skill dir + system prompt
+attachEventRecorder()       session events → events.jsonl
+```
+
+### Phase 2 — Auth and browser open
+
+The first agent turn uses a 10-minute timeout (`600_000 ms`). This is intentional: a `login-then-save` run may require the agent to fill in a login form and wait for a redirect, which can take several minutes on slow apps. No other turn uses this timeout.
+
+If the auth mode is `login-then-save`, a second prompt is sent immediately after (2-minute timeout) to save the browser storage state to disk before any exploration begins.
+
+### Phase 3 — CDP discovery and monitoring start
+
+CDP discovery runs **after** the first agent turn, not before. The agent must call `playwright-cli open` to create the `.session` file; `discoverCdpWs()` polls for that file. Once the WebSocket URL is known, `MonitoringBundle` starts: `CdpSampler` begins polling metrics over CDP, and `StuckDetector` begins watching session events. Every session event — not just user-visible ones — resets the stuck detector's watchdog timer.
+
+### Phase 4 — Main loop
+
+```
+while (!stopping && Date.now() < deadline):
+  sendAndWait(STEP_PROMPT, 300_000 ms)
+  on error: log, sleep 5 s, continue
+```
+
+The loop survives transient `sendAndWait` failures. A single failed turn does not end the run — the orchestrator logs the error, waits 5 seconds, and resumes. This handles temporary agent errors (e.g. a tool timeout mid-turn) without wasting the entire session.
+
+### Phase 5 — Teardown (always in `finally`)
+
+```
+monitoring.stop()           StuckDetector off, CdpSampler disconnects
+sendAndWait(CLOSE_PROMPT)   agent closes browser cleanly (60 s timeout)
+runner.stop()               client.stop() kills CLI subprocess + closes sockets
+artifacts.close()           flush all JSONL write buffers
+buildReport()               join events + metrics + findings → report.md
+```
+
+Order is load-bearing: monitoring must stop before the runner so the stuck detector does not fire during teardown; JSONL buffers must flush before `buildReport()` reads them. The teardown block runs even if the main loop throws.
+
+---
+
+## Overall Architecture: Single Agent + Orchestrator
+
+### The design
+
+This is not a multi-agent system. There is one AI agent. The layers are:
+
+**Orchestrator (`runCoordinator.ts`)** — The TypeScript process you run. It wires every module together, owns the run lifecycle (startup → main loop → teardown), and is not an AI model itself.
+
+**AI Agent (`SessionRunner`)** — One `CopilotSession` wrapping GitHub Copilot. It receives prompts, executes `playwright-cli` tool calls to control the browser, and writes bug findings to `findings.jsonl`. `sendAndWait()` blocks until the agent reaches `idle`, regardless of how many intermediate tool calls it makes.
+
+**Parallel Observer (not an agent)** — `CdpSampler` attaches to the browser over CDP independently of the agent and samples memory/DOM metrics on a timer. `StuckDetector` watches for session silence and aborts the current turn if the threshold is exceeded. Neither is an AI model; both are passive monitors.
+
+**Three JSONL streams** — Each stream is written by a different layer and consumed at report time:
+
+| Stream | Writer | Contains |
+|---|---|---|
+| `events.jsonl` | `EventRecorder` | Agent messages, tool calls, token usage |
+| `metrics.jsonl` | `CdpSampler` | JS heap, DOM nodes, event listeners |
+| `findings.jsonl` | The AI agent (`bash echo`) | Bug reports with severity and repro steps |
+
+`buildReport()` joins all three by timestamp into `report.md` at teardown.
+
+### Why not multi-agent
+
+Splitting into multiple agents (e.g. one for navigation, one for validation, one for reporting) would add coordination overhead — shared state, inter-agent messaging, partial failure handling — without a clear benefit for exploratory testing, where a single coherent context window produces more consistent bug narratives than fragmented sub-agent outputs.
+
+If parallel coverage is needed, the natural extension is running multiple independent `SessionRunner` instances concurrently (different personas or app areas), then merging their `findings.jsonl` outputs at the report stage — not introducing agent-to-agent communication.
