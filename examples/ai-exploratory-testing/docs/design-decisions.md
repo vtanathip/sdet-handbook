@@ -212,3 +212,41 @@ This is not a multi-agent system. There is one AI agent. The layers are:
 Splitting into multiple agents (e.g. one for navigation, one for validation, one for reporting) would add coordination overhead — shared state, inter-agent messaging, partial failure handling — without a clear benefit for exploratory testing, where a single coherent context window produces more consistent bug narratives than fragmented sub-agent outputs.
 
 If parallel coverage is needed, the natural extension is running multiple independent `SessionRunner` instances concurrently (different personas or app areas), then merging their `findings.jsonl` outputs at the report stage — not introducing agent-to-agent communication.
+
+---
+
+## Orchestrator vs. Direct Code
+
+### The problem
+
+`runOrchestration()` imports from nine modules and wires them into a fixed sequence. The alternative — writing the entire run lifecycle as a single function or script — is simpler to write initially. Why add the indirection?
+
+### Why the orchestrator layer
+
+**Single lifecycle owner.** `runOrchestration()` is the only place that knows the full run sequence (startup → auth → browser open → monitoring → main loop → teardown). A `try/finally` block in one location guarantees that monitoring stops, JSONL buffers flush, and the report builds regardless of where a failure occurs. In direct code these exit paths scatter.
+
+**Independently testable modules.** Because `SessionRunner`, `StuckDetector`, `MonitoringBundle`, and `ReportBuilder` know nothing about each other, each has its own unit tests without spinning up a browser or a live Copilot session. The agent's non-deterministic behaviour makes isolation especially valuable — a `StuckDetector` bug should be diagnosable without a real run.
+
+**Cheap to swap implementations.** `resolveAuthMode()` returns an enum; the orchestrator branches on it. Adding a new auth strategy means editing one file and one branch — not hunting through 600 lines. The same applies to swapping the CDP sampler interval, changing the stuck threshold, or replacing the report format.
+
+**Readable at a glance.** The ~80-line coordinator reads as a script of _what_ happens, not _how_. New contributors understand the run lifecycle without reading every module.
+
+### The costs
+
+**Indirection.** Finding a bug requires tracing from `runOrchestration()` through the responsible module. Each layer adds one file hop.
+
+**God-object risk.** `runOrchestration()` already touches nine imports. If modules begin calling each other directly instead of surfacing state through the orchestrator, the design degrades into a hidden dependency graph — harder to follow than direct code.
+
+**Interface boilerplate.** Each module boundary requires an options type (`CoordinatorOpts`, `MonitoringBundleOpts`, etc.). For a small one-shot script this is pure overhead.
+
+### When direct code wins instead
+
+| Scenario | Orchestrator | Direct code |
+|---|---|---|
+| Long-lived tool, multiple contributors | ✓ | |
+| Unit test coverage required | ✓ | |
+| Multiple swap-able strategies | ✓ | |
+| One-shot automation script, <150 lines | | ✓ |
+| Single fixed workflow, no test coverage needed | | ✓ |
+
+The deciding factor for this codebase: because the AI agent's behaviour is non-deterministic, every supporting component (`StuckDetector`, `EventRecorder`, `ReportBuilder`) must be testable in isolation. That isolation requirement is what justifies the orchestrator boundary.
