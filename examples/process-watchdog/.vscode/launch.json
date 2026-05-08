@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug ProcessWatchdog",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build",
+      "program": "${workspaceFolder}/ProcessWatchdog/bin/Debug/net8.0/ProcessWatchdog.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/ProcessWatchdog",
+      "console": "integratedTerminal",
+      "stopAtEntry": false
+    }
+  ]
+}
