@@ -173,8 +173,13 @@ modeldb/
 # Claude Code harness state
 .claude/
 
+# Watchdog runtime state — written by start-excel.ps1, read by run-watchdog.ps1
+.excel-session.json
+
 # Graphify — intermediate pipeline files (re-generated on demand)
 # Keep GRAPH_REPORT.md and graph.html committed; ignore everything else
-graphify-out/.graphify_*
-graphify-out/graph.json
-graphify-out/cache/
+**/graphify-out/.graphify_*
+**/graphify-out/graph.json
+**/graphify-out/cache/
+**/graphify-out/cost.json
+**/graphify-out/manifest.json
