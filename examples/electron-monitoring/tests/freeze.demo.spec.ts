@@ -78,3 +78,9 @@ test('renderer crash → native render-process-gone', async ({ app }) => {
   await step('click Crash renderer', () => window.getByTestId('crash').click().catch(() => {}));
   await settle(1500); // let nativeSignals drain the render-process-gone event
 });
+
+test('main crash → main-process-gone (harness-side detection)', async ({ app }) => {
+  const { window, step } = app;
+  await step('click Crash MAIN process', () => window.getByTestId('crash-main').click().catch(() => {}));
+  await settle(1500); // the app dies; watchMainDeath records it before teardown builds the report
+});

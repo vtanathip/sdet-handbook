@@ -216,6 +216,7 @@ function evidenceLine(e: FreezeEvent): string {
       if (d.kind === 'sustained-cpu') return `CPU ${String(d.cpuPct)}% sustained on the ${String(d.process)} process`;
       return 'resource pressure';
     case 'native': {
+      if (d.kind === 'main-process-gone') return `MAIN process exited unexpectedly (code ${String(d.code)}${d.signal ? `, ${String(d.signal)}` : ''}) — the whole app went down`;
       const det = d.details as { reason?: string; exitCode?: number } | undefined;
       const reason = det?.reason ? ` — reason: ${det.reason}${det.exitCode != null ? ` (exit ${det.exitCode})` : ''}` : '';
       return `${String(d.kind)}${reason}`;

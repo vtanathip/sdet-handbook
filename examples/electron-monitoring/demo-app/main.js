@@ -35,6 +35,9 @@ ipcMain.on('crash', (e) => {
   e.sender.forcefullyCrashRenderer();
 });
 
+// Hard MAIN-process crash → the whole app dies; only the harness-side watcher can report it.
+ipcMain.on('crash-main', () => { process.crash(); });
+
 // IPC flood target: a cheap handler hit thousands of times saturates the main event loop (L3/L7).
 let ipcHits = 0;
 ipcMain.on('em-ipc-noop', () => { ipcHits++; });
@@ -42,6 +45,17 @@ ipcMain.on('em-ipc-noop', () => { ipcHits++; });
 // Jumbo IPC payload: deserializing a large structured clone blocks the main thread (L3); the
 // renderer blocked while serializing it (L1).
 ipcMain.handle('em-ipc-echo', (_e, data) => (data ? data.length : 0));
+
+// Spawn an external child process. require() at call time so the monitor's child_process patch is in
+// effect. 'hang' lingers (flagged hung); 'crash' exits non-zero (flagged crashed).
+ipcMain.handle('spawn-child', (_e, kind) => {
+  const cp = require('node:child_process');
+  const isWin = process.platform === 'win32';
+  const c = kind === 'crash'
+    ? (isWin ? cp.spawn('cmd', ['/c', 'exit 7']) : cp.spawn('sh', ['-c', 'exit 7']))
+    : (isWin ? cp.spawn('cmd', ['/c', 'timeout 30']) : cp.spawn('sh', ['-c', 'sleep 30']));
+  return c.pid;
+});
 
 function createWindow() {
   const win = new BrowserWindow({

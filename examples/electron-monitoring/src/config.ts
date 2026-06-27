@@ -23,6 +23,8 @@ const ConfigSchema = z.object({
   storagePct: z.number().default(0.8),          // fraction of quota that flags storage-pressure
   diskLowBytes: z.number().default(500 * 1024 * 1024), // free bytes under which disk-low fires
   ioSlowMs: z.number().default(750),            // tiny userData write slower than this = slow-disk
+  // A spawned child still alive past this (while the app may be awaiting it) is flagged as hung.
+  subprocessHungMs: z.number().default(10000),
   deepEvidenceMinMs: z.number().default(3000),
   // recordVideo can jam Electron's CDP pipe in headless/displayless environments — opt-in.
   recordVideo: z.boolean().default(false),
@@ -53,6 +55,7 @@ export function loadConfig(): Config {
     storagePct: num('STORAGE_PCT'),
     diskLowBytes: num('DISK_LOW_BYTES'),
     ioSlowMs: num('IO_SLOW_MS'),
+    subprocessHungMs: num('SUBPROCESS_HUNG_MS'),
     recordVideo: process.env.RECORD_VIDEO === '1' ? true : undefined,
   });
 }

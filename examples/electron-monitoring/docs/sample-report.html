@@ -40,131 +40,173 @@
   @media print{body{background:#fff}.tl-row:hover{background:none}.card{box-shadow:none}}
 </style></head><body><div class="wrap">
   <div class="banner FAIL">
-    <h1>❌ FAIL — 8 freezes, worst 4.0s</h1>
-    <p>Total time frozen: 14.3s. Tap a row or card to jump to the cause.</p>
+    <h1>❌ FAIL — 11 freezes, worst 7.1s</h1>
+    <p>Total time frozen: 21.9s. Tap a row or card to jump to the cause.</p>
   </div>
   <div class="meta">
     <span><b>App:</b> ./demo-app</span>
     <span><b>Mode:</b> source</span>
-    <span><b>When:</b> 17:14:08–17:15:20</span>
+    <span><b>When:</b> 22:12:03–22:13:34</span>
     <span><b>Threshold:</b> 200ms</span>
   </div>
   
   <h2>Timeline — which action froze, and for how long</h2>
   <div class="timeline"><a class="tl-row" href="#inc0">
-      <span class="tl-time">17:14:08</span>
-      <span class="tl-act" title="click Freeze 4s">click Freeze 4s</span>
+      <span class="tl-time">22:12:04</span>
+      <span class="tl-act" title="click Stuck request">click Stuck request</span>
       <span class="tl-track"><span class="tl-fill sev-severe" style="width:100%"></span></span>
-      <span class="tl-dur">4.0s <em>SEVERE</em></span>
+      <span class="tl-dur">7.1s <em>SEVERE</em></span>
     </a><a class="tl-row" href="#inc1">
-      <span class="tl-time">17:14:13</span>
-      <span class="tl-act" title="click Freeze 2s">click Freeze 2s</span>
-      <span class="tl-track"><span class="tl-fill sev-moderate" style="width:50%"></span></span>
-      <span class="tl-dur">2.0s <em>MODERATE</em></span>
+      <span class="tl-time">22:12:04</span>
+      <span class="tl-act" title="click Freeze 4s">click Freeze 4s</span>
+      <span class="tl-track"><span class="tl-fill sev-severe" style="width:56%"></span></span>
+      <span class="tl-dur">4.0s <em>SEVERE</em></span>
     </a><a class="tl-row" href="#inc2">
-      <span class="tl-time">17:14:16</span>
-      <span class="tl-act" title="click Main busy 3s">click Main busy 3s</span>
-      <span class="tl-track"><span class="tl-fill sev-moderate" style="width:75%"></span></span>
-      <span class="tl-dur">3.0s <em>MODERATE</em></span>
+      <span class="tl-time">22:12:09</span>
+      <span class="tl-act" title="click Freeze 2s">click Freeze 2s</span>
+      <span class="tl-track"><span class="tl-fill sev-moderate" style="width:28%"></span></span>
+      <span class="tl-dur">2.0s <em>MODERATE</em></span>
     </a><a class="tl-row" href="#inc3">
-      <span class="tl-time">17:14:23</span>
-      <span class="tl-act" title="click Sync deadlock">click Sync deadlock</span>
-      <span class="tl-track"><span class="tl-fill sev-severe" style="width:77%"></span></span>
-      <span class="tl-dur">3.1s <em>SEVERE</em></span>
+      <span class="tl-time">22:12:12</span>
+      <span class="tl-act" title="click Main busy 3s">click Main busy 3s</span>
+      <span class="tl-track"><span class="tl-fill sev-moderate" style="width:42%"></span></span>
+      <span class="tl-dur">3.0s <em>MODERATE</em></span>
     </a><a class="tl-row" href="#inc4">
-      <span class="tl-time">17:14:27</span>
-      <span class="tl-act" title="click IPC flood">click IPC flood</span>
-      <span class="tl-track"><span class="tl-fill sev-moderate" style="width:6%"></span></span>
-      <span class="tl-dur">0.3s <em>MODERATE</em></span>
+      <span class="tl-time">22:12:19</span>
+      <span class="tl-act" title="click Sync deadlock">click Sync deadlock</span>
+      <span class="tl-track"><span class="tl-fill sev-severe" style="width:45%"></span></span>
+      <span class="tl-dur">3.2s <em>SEVERE</em></span>
     </a><a class="tl-row" href="#inc5">
-      <span class="tl-time">17:14:30</span>
-      <span class="tl-act" title="click IPC jumbo">click IPC jumbo</span>
-      <span class="tl-track"><span class="tl-fill sev-moderate" style="width:19%"></span></span>
-      <span class="tl-dur">0.7s <em>MODERATE</em></span>
+      <span class="tl-time">22:12:23</span>
+      <span class="tl-act" title="click IPC flood">click IPC flood</span>
+      <span class="tl-track"><span class="tl-fill sev-moderate" style="width:7%"></span></span>
+      <span class="tl-dur">0.5s <em>MODERATE</em></span>
     </a><a class="tl-row" href="#inc6">
-      <span class="tl-time">17:14:36</span>
-      <span class="tl-act" title="click GPU stall">click GPU stall</span>
-      <span class="tl-track"><span class="tl-fill sev-moderate" style="width:30%"></span></span>
-      <span class="tl-dur">1.2s <em>MODERATE</em></span>
+      <span class="tl-time">22:12:26</span>
+      <span class="tl-act" title="click IPC jumbo">click IPC jumbo</span>
+      <span class="tl-track"><span class="tl-fill sev-moderate" style="width:12%"></span></span>
+      <span class="tl-dur">0.9s <em>MODERATE</em></span>
     </a><a class="tl-row" href="#inc7">
-      <span class="tl-time">17:14:42</span>
+      <span class="tl-time">22:12:33</span>
+      <span class="tl-act" title="click GPU stall">click GPU stall</span>
+      <span class="tl-track"><span class="tl-fill sev-moderate" style="width:17%"></span></span>
+      <span class="tl-dur">1.2s <em>MODERATE</em></span>
+    </a><a class="tl-row" href="#inc8">
+      <span class="tl-time">22:12:35</span>
+      <span class="tl-act" title="click JS error">click JS error</span>
+      <span class="tl-track"><span class="tl-fill sev-moderate" style="width:6%"></span></span>
+      <span class="tl-dur">0.0s <em>MODERATE</em></span>
+    </a><a class="tl-row" href="#inc9">
+      <span class="tl-time">22:12:39</span>
       <span class="tl-act" title="click Crash renderer">click Crash renderer</span>
+      <span class="tl-track"><span class="tl-fill sev-severe" style="width:6%"></span></span>
+      <span class="tl-dur">0.0s <em>SEVERE</em></span>
+    </a><a class="tl-row" href="#inc10">
+      <span class="tl-time">22:13:26</span>
+      <span class="tl-act" title="click Crash MAIN process">click Crash MAIN process</span>
       <span class="tl-track"><span class="tl-fill sev-severe" style="width:6%"></span></span>
       <span class="tl-dur">0.0s <em>SEVERE</em></span>
     </a></div>
   <h2>What froze &amp; how to fix it</h2>
   <section id="inc0" class="card sev-severe">
-      <h3><span class="num">#1</span> Long JavaScript task · 4.0s <span class="badge sev-severe">SEVERE</span></h3>
-      <div class="kv"><span>Triggered by</span><div><b>click Freeze 4s</b> at 17:14:08</div></div>
-      <div class="kv"><span>Root cause</span><div class="cause">file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2261)</div></div>
+      <h3><span class="num">#1</span> Stuck operation (spinner) · 7.1s <span class="badge sev-severe">SEVERE</span></h3>
+      <div class="kv"><span>Triggered by</span><div><b>click Stuck request</b> at 22:12:04</div></div>
+      <div class="kv"><span>Root cause</span><div class="cause">request stuck 7s — hang://stall/never</div></div>
+      <div class="kv"><span>What happened</span><div>An async operation never completed while the app kept running and CPU stayed idle — the classic “spinner that never resolves”: a hung request, an IPC reply that never came, or a stuck page load.</div></div>
+      <div class="kv"><span>CPU</span><div>peak 6.9% on the Tab process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
+      <div class="kv"><span>Next step</span><div class="fix">Add a timeout / AbortController to the request or IPC call below; make sure every handler eventually resolves or rejects.</div></div>
+      <div class="kv"><span>Signals</span><div><span class="chip">Stuck operation (spinner)</span><ul class="sig"><li><b>Stuck operation (spinner)</b> — request stuck 7s — hang://stall/never</li></ul></div></div>
+      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>22:12:04</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
+    </section><section id="inc1" class="card sev-severe">
+      <h3><span class="num">#2</span> Long JavaScript task · 4.0s <span class="badge sev-severe">SEVERE</span></h3>
+      <div class="kv"><span>Triggered by</span><div><b>click Freeze 4s</b> at 22:12:04</div></div>
+      <div class="kv"><span>Root cause</span><div class="cause">file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2979)</div></div>
       <div class="kv"><span>What happened</span><div>A single JavaScript task ran far past one frame, blocking input and rendering.</div></div>
       <div class="kv"><span>CPU</span><div>peak 6.9% on the Tab process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
       <div class="kv"><span>Next step</span><div class="fix">Optimize or split the function shown below; defer non-urgent work (requestIdleCallback / setTimeout / batching).</div></div>
-      <div class="kv"><span>Signals</span><div><span class="chip">UI thread froze</span><span class="chip">Long JavaScript task</span><ul class="sig"><li><b>UI thread froze</b> — UI thread unresponsive for 4004ms</li><li><b>Long JavaScript task</b> — blocked 3950ms — file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2261, 3999ms)</li><li><b>Long JavaScript task</b> — blocked 4000ms (longtask)</li></ul></div></div>
-      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>17:14:08</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
-    </section><section id="inc1" class="card sev-moderate">
-      <h3><span class="num">#2</span> Long JavaScript task · 2.0s <span class="badge sev-moderate">MODERATE</span></h3>
-      <div class="kv"><span>Triggered by</span><div><b>click Freeze 2s</b> at 17:14:13</div></div>
-      <div class="kv"><span>Root cause</span><div class="cause">file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2261)</div></div>
-      <div class="kv"><span>What happened</span><div>A single JavaScript task ran far past one frame, blocking input and rendering.</div></div>
-      <div class="kv"><span>CPU</span><div>peak 6.9% on the Tab process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
-      <div class="kv"><span>Next step</span><div class="fix">Optimize or split the function shown below; defer non-urgent work (requestIdleCallback / setTimeout / batching).</div></div>
-      <div class="kv"><span>Signals</span><div><span class="chip">Long JavaScript task</span><span class="chip">UI thread froze</span><ul class="sig"><li><b>Long JavaScript task</b> — blocked 1949ms — file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2261, 1999ms)</li><li><b>UI thread froze</b> — UI thread unresponsive for 2002ms</li><li><b>Long JavaScript task</b> — blocked 1999ms (longtask)</li></ul></div></div>
-      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>17:14:13</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
+      <div class="kv"><span>Signals</span><div><span class="chip">Long JavaScript task</span><span class="chip">UI thread froze</span><ul class="sig"><li><b>Long JavaScript task</b> — blocked 3950ms — file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2979, 3999ms)</li><li><b>UI thread froze</b> — UI thread unresponsive for 4002ms</li><li><b>Long JavaScript task</b> — blocked 4000ms (longtask)</li></ul></div></div>
+      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>22:12:04</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
     </section><section id="inc2" class="card sev-moderate">
-      <h3><span class="num">#3</span> Main process blocked · 3.0s <span class="badge sev-moderate">MODERATE</span></h3>
-      <div class="kv"><span>Triggered by</span><div><b>click Main busy 3s</b> at 17:14:16</div></div>
-      <div class="kv"><span>Root cause</span><div class="cause">main event loop stalled 2985ms</div></div>
-      <div class="kv"><span>What happened</span><div>The Electron main (Node) event loop stalled — this freezes every window and all IPC at once.</div></div>
-      <div class="kv"><span>CPU</span><div>peak 3.9% on the Browser process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
-      <div class="kv"><span>Next step</span><div class="fix">Remove synchronous work from the main process: no blocking I/O or heavy compute in IPC handlers; avoid sendSync into slow handlers.</div></div>
-      <div class="kv"><span>Signals</span><div><span class="chip">Main process blocked</span><ul class="sig"><li><b>Main process blocked</b> — main event loop stalled 2985ms</li></ul></div></div>
-      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>17:14:16</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
-    </section><section id="inc3" class="card sev-severe">
-      <h3><span class="num">#4</span> Main process blocked · 3.1s <span class="badge sev-severe">SEVERE</span></h3>
-      <div class="kv"><span>Triggered by</span><div><b>click Sync deadlock</b> at 17:14:23</div></div>
-      <div class="kv"><span>Root cause</span><div class="cause">file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2261)</div></div>
-      <div class="kv"><span>What happened</span><div>The Electron main (Node) event loop stalled — this freezes every window and all IPC at once.</div></div>
-      <div class="kv"><span>CPU</span><div>peak 5.3% on the Browser process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
-      <div class="kv"><span>Next step</span><div class="fix">Remove synchronous work from the main process: no blocking I/O or heavy compute in IPC handlers; avoid sendSync into slow handlers.</div></div>
-      <div class="kv"><span>Signals</span><div><span class="chip">Long JavaScript task</span><span class="chip">UI thread froze</span><span class="chip">Main process blocked</span><ul class="sig"><li><b>Long JavaScript task</b> — blocked 2950ms — file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2261, 2999ms)</li><li><b>UI thread froze</b> — UI thread unresponsive for 3002ms</li><li><b>Long JavaScript task</b> — blocked 3000ms (longtask)</li><li><b>Main process blocked</b> — main event loop stalled 2968ms</li></ul></div></div>
-      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>17:14:23</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
-    </section><section id="inc4" class="card sev-moderate">
-      <h3><span class="num">#5</span> IPC flood · 0.3s <span class="badge sev-moderate">MODERATE</span></h3>
-      <div class="kv"><span>Triggered by</span><div><b>click IPC flood</b> at 17:14:27</div></div>
-      <div class="kv"><span>Root cause</span><div class="cause">50000 IPC messages in one interval (~200000/s)</div></div>
-      <div class="kv"><span>What happened</span><div>The renderer sent IPC messages faster than the main process could drain them (backpressure) — the queue could not flush.</div></div>
-      <div class="kv"><span>CPU</span><div>peak 9.2% on the Browser process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
-      <div class="kv"><span>Next step</span><div class="fix">Batch or throttle ipcRenderer.send; coalesce per-event chatter into fewer, larger messages.</div></div>
-      <div class="kv"><span>Signals</span><div><span class="chip">IPC flood</span><ul class="sig"><li><b>IPC flood</b> — 50000 IPC messages in one interval (~200000/s)</li></ul></div></div>
-      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>17:14:27</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
-    </section><section id="inc5" class="card sev-moderate">
-      <h3><span class="num">#6</span> Main process blocked · 0.7s <span class="badge sev-moderate">MODERATE</span></h3>
-      <div class="kv"><span>Triggered by</span><div><b>click IPC jumbo</b> at 17:14:30</div></div>
-      <div class="kv"><span>Root cause</span><div class="cause">file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2261)</div></div>
-      <div class="kv"><span>What happened</span><div>The Electron main (Node) event loop stalled — this freezes every window and all IPC at once.</div></div>
-      <div class="kv"><span>CPU</span><div>peak 10.3% on the Tab process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
-      <div class="kv"><span>Next step</span><div class="fix">Remove synchronous work from the main process: no blocking I/O or heavy compute in IPC handlers; avoid sendSync into slow handlers.</div></div>
-      <div class="kv"><span>Signals</span><div><span class="chip">Long JavaScript task</span><span class="chip">UI thread froze</span><span class="chip">Main process blocked</span><span class="chip">Resource pressure</span><ul class="sig"><li><b>Long JavaScript task</b> — blocked 271ms — file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2261, 320ms)</li><li><b>Long JavaScript task</b> — blocked 321ms (longtask)</li><li><b>UI thread froze</b> — UI thread unresponsive for 323ms</li><li><b>Main process blocked</b> — main event loop stalled 361ms</li><li><b>Resource pressure</b> — memory grew 2.15× (now 842 MB)</li></ul></div></div>
-      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>17:14:30</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
-    </section><section id="inc6" class="card sev-moderate">
-      <h3><span class="num">#7</span> Long JavaScript task · 1.2s <span class="badge sev-moderate">MODERATE</span></h3>
-      <div class="kv"><span>Triggered by</span><div><b>click GPU stall</b> at 17:14:36</div></div>
-      <div class="kv"><span>Root cause</span><div class="cause">file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2261)</div></div>
+      <h3><span class="num">#3</span> Long JavaScript task · 2.0s <span class="badge sev-moderate">MODERATE</span></h3>
+      <div class="kv"><span>Triggered by</span><div><b>click Freeze 2s</b> at 22:12:09</div></div>
+      <div class="kv"><span>Root cause</span><div class="cause">file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2979)</div></div>
       <div class="kv"><span>What happened</span><div>A single JavaScript task ran far past one frame, blocking input and rendering.</div></div>
-      <div class="kv"><span>CPU</span><div>peak 5.7% on the Tab process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
+      <div class="kv"><span>CPU</span><div>peak 6.9% on the Tab process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
       <div class="kv"><span>Next step</span><div class="fix">Optimize or split the function shown below; defer non-urgent work (requestIdleCallback / setTimeout / batching).</div></div>
-      <div class="kv"><span>Signals</span><div><span class="chip">UI thread froze</span><span class="chip">Long JavaScript task</span><ul class="sig"><li><b>UI thread froze</b> — UI thread unresponsive for 1210ms</li><li><b>Long JavaScript task</b> — blocked 1157ms — file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2261, 1207ms)</li><li><b>Long JavaScript task</b> — blocked 1207ms (longtask)</li></ul></div></div>
-      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>17:14:36</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
-    </section><section id="inc7" class="card sev-severe">
-      <h3><span class="num">#8</span> Unresponsive / crash · 0.0s <span class="badge sev-severe">SEVERE</span></h3>
-      <div class="kv"><span>Triggered by</span><div><b>click Crash renderer</b> at 17:14:42</div></div>
+      <div class="kv"><span>Signals</span><div><span class="chip">Long JavaScript task</span><span class="chip">UI thread froze</span><ul class="sig"><li><b>Long JavaScript task</b> — blocked 1950ms — file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2979, 1999ms)</li><li><b>Long JavaScript task</b> — blocked 2000ms (longtask)</li><li><b>UI thread froze</b> — UI thread unresponsive for 2001ms</li></ul></div></div>
+      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>22:12:09</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
+    </section><section id="inc3" class="card sev-moderate">
+      <h3><span class="num">#4</span> Main process blocked · 3.0s <span class="badge sev-moderate">MODERATE</span></h3>
+      <div class="kv"><span>Triggered by</span><div><b>click Main busy 3s</b> at 22:12:12</div></div>
+      <div class="kv"><span>Root cause</span><div class="cause">main event loop stalled 2969ms</div></div>
+      <div class="kv"><span>What happened</span><div>The Electron main (Node) event loop stalled — this freezes every window and all IPC at once.</div></div>
+      <div class="kv"><span>CPU</span><div>peak 0.6% on the Browser process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
+      <div class="kv"><span>Next step</span><div class="fix">Remove synchronous work from the main process: no blocking I/O or heavy compute in IPC handlers; avoid sendSync into slow handlers.</div></div>
+      <div class="kv"><span>Signals</span><div><span class="chip">Main process blocked</span><ul class="sig"><li><b>Main process blocked</b> — main event loop stalled 2969ms</li></ul></div></div>
+      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>22:12:12</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
+    </section><section id="inc4" class="card sev-severe">
+      <h3><span class="num">#5</span> Main process blocked · 3.2s <span class="badge sev-severe">SEVERE</span></h3>
+      <div class="kv"><span>Triggered by</span><div><b>click Sync deadlock</b> at 22:12:19</div></div>
+      <div class="kv"><span>Root cause</span><div class="cause">file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2979)</div></div>
+      <div class="kv"><span>What happened</span><div>The Electron main (Node) event loop stalled — this freezes every window and all IPC at once.</div></div>
+      <div class="kv"><span>CPU</span><div>peak 2% on the Browser process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
+      <div class="kv"><span>Next step</span><div class="fix">Remove synchronous work from the main process: no blocking I/O or heavy compute in IPC handlers; avoid sendSync into slow handlers.</div></div>
+      <div class="kv"><span>Signals</span><div><span class="chip">Long JavaScript task</span><span class="chip">UI thread froze</span><span class="chip">Main process blocked</span><ul class="sig"><li><b>Long JavaScript task</b> — blocked 2950ms — file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2979, 2999ms)</li><li><b>UI thread froze</b> — UI thread unresponsive for 3002ms</li><li><b>Long JavaScript task</b> — blocked 3000ms (longtask)</li><li><b>Main process blocked</b> — main event loop stalled 2978ms</li></ul></div></div>
+      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>22:12:19</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
+    </section><section id="inc5" class="card sev-moderate">
+      <h3><span class="num">#6</span> IPC flood · 0.5s <span class="badge sev-moderate">MODERATE</span></h3>
+      <div class="kv"><span>Triggered by</span><div><b>click IPC flood</b> at 22:12:23</div></div>
+      <div class="kv"><span>Root cause</span><div class="cause">29412 IPC messages in one interval (~117648/s)</div></div>
+      <div class="kv"><span>What happened</span><div>The renderer sent IPC messages faster than the main process could drain them (backpressure) — the queue could not flush.</div></div>
+      <div class="kv"><span>CPU</span><div>peak 7.1% on the Browser process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
+      <div class="kv"><span>Next step</span><div class="fix">Batch or throttle ipcRenderer.send; coalesce per-event chatter into fewer, larger messages.</div></div>
+      <div class="kv"><span>Signals</span><div><span class="chip">IPC flood</span><ul class="sig"><li><b>IPC flood</b> — 29412 IPC messages in one interval (~117648/s)</li><li><b>IPC flood</b> — 20588 IPC messages in one interval (~82352/s)</li></ul></div></div>
+      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>22:12:23</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
+    </section><section id="inc6" class="card sev-moderate">
+      <h3><span class="num">#7</span> Main process blocked · 0.9s <span class="badge sev-moderate">MODERATE</span></h3>
+      <div class="kv"><span>Triggered by</span><div><b>click IPC jumbo</b> at 22:12:26</div></div>
+      <div class="kv"><span>Root cause</span><div class="cause">file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2979)</div></div>
+      <div class="kv"><span>What happened</span><div>The Electron main (Node) event loop stalled — this freezes every window and all IPC at once.</div></div>
+      <div class="kv"><span>CPU</span><div>peak 8.1% on the Tab process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
+      <div class="kv"><span>Next step</span><div class="fix">Remove synchronous work from the main process: no blocking I/O or heavy compute in IPC handlers; avoid sendSync into slow handlers.</div></div>
+      <div class="kv"><span>Signals</span><div><span class="chip">Long JavaScript task</span><span class="chip">UI thread froze</span><span class="chip">Main process blocked</span><span class="chip">Resource pressure</span><ul class="sig"><li><b>Long JavaScript task</b> — blocked 285ms — file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2979, 334ms)</li><li><b>Long JavaScript task</b> — blocked 335ms (longtask)</li><li><b>UI thread froze</b> — UI thread unresponsive for 337ms</li><li><b>Main process blocked</b> — main event loop stalled 333ms</li><li><b>Resource pressure</b> — memory grew 2.18× (now 852 MB)</li></ul></div></div>
+      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>22:12:26</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
+    </section><section id="inc7" class="card sev-moderate">
+      <h3><span class="num">#8</span> Long JavaScript task · 1.2s <span class="badge sev-moderate">MODERATE</span></h3>
+      <div class="kv"><span>Triggered by</span><div><b>click GPU stall</b> at 22:12:33</div></div>
+      <div class="kv"><span>Root cause</span><div class="cause">file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2979)</div></div>
+      <div class="kv"><span>What happened</span><div>A single JavaScript task ran far past one frame, blocking input and rendering.</div></div>
+      <div class="kv"><span>CPU</span><div>peak 5.8% on the Tab process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
+      <div class="kv"><span>Next step</span><div class="fix">Optimize or split the function shown below; defer non-urgent work (requestIdleCallback / setTimeout / batching).</div></div>
+      <div class="kv"><span>Signals</span><div><span class="chip">UI thread froze</span><span class="chip">Long JavaScript task</span><ul class="sig"><li><b>UI thread froze</b> — UI thread unresponsive for 1202ms</li><li><b>Long JavaScript task</b> — blocked 1150ms — file:///Users/vtanathip/Repository/sdet-handbook/examples/electron-monitoring/demo-app/index.html → (anonymous) (offset 2979, 1199ms)</li><li><b>Long JavaScript task</b> — blocked 1200ms (longtask)</li></ul></div></div>
+      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>22:12:33</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
+    </section><section id="inc8" class="card sev-moderate">
+      <h3><span class="num">#9</span> JavaScript error · 0.0s <span class="badge sev-moderate">MODERATE</span></h3>
+      <div class="kv"><span>Triggered by</span><div><b>click JS error</b> at 22:12:35</div></div>
+      <div class="kv"><span>Root cause</span><div class="cause">console.error [renderer]: demo console error</div></div>
+      <div class="kv"><span>What happened</span><div>Code threw an uncaught exception / unhandled rejection (or logged an error). The app may be in a broken state even though it did not freeze or crash.</div></div>
+      <div class="kv"><span>CPU</span><div>peak 0.8% on the Browser process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
+      <div class="kv"><span>Next step</span><div class="fix">Read the message + stack below and fix the throw. A preload throw means your exposed API never loaded — check the preload and contextBridge wiring.</div></div>
+      <div class="kv"><span>Signals</span><div><span class="chip">JavaScript error</span><ul class="sig"><li><b>JavaScript error</b> — console.error [renderer]: demo console error</li><li><b>JavaScript error</b> — uncaught-exception [renderer]: demo uncaught exception</li></ul></div></div>
+      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>22:12:35</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
+    </section><section id="inc9" class="card sev-severe">
+      <h3><span class="num">#10</span> Unresponsive / crash · 0.0s <span class="badge sev-severe">SEVERE</span></h3>
+      <div class="kv"><span>Triggered by</span><div><b>click Crash renderer</b> at 22:12:39</div></div>
       <div class="kv"><span>Root cause</span><div class="cause">render-process-gone — reason: killed (exit 2)</div></div>
       <div class="kv"><span>What happened</span><div>Chromium flagged the window unresponsive, or a process crashed.</div></div>
-      <div class="kv"><span>CPU</span><div>peak 2% on the Utility process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
+      <div class="kv"><span>CPU</span><div>peak 3.2% on the Utility process — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
       <div class="kv"><span>Next step</span><div class="fix">Check the crash reason below and correlate with the freeze immediately before it.</div></div>
       <div class="kv"><span>Signals</span><div><span class="chip">Unresponsive / crash</span><ul class="sig"><li><b>Unresponsive / crash</b> — render-process-gone — reason: killed (exit 2)</li></ul></div></div>
-      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>17:14:42</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
+      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>22:12:39</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
+    </section><section id="inc10" class="card sev-severe">
+      <h3><span class="num">#11</span> Unresponsive / crash · 0.0s <span class="badge sev-severe">SEVERE</span></h3>
+      <div class="kv"><span>Triggered by</span><div><b>click Crash MAIN process</b> at 22:13:26</div></div>
+      <div class="kv"><span>Root cause</span><div class="cause">MAIN process exited unexpectedly (code null, SIGSEGV) — the whole app went down</div></div>
+      <div class="kv"><span>What happened</span><div>Chromium flagged the window unresponsive, or a process crashed.</div></div>
+      <div class="kv"><span>CPU</span><div>near 0% (a blocked process often can’t be sampled mid-freeze — treat as approximate) — getAppMetrics CPU% is coarse; use trace.json for the real hot path</div></div>
+      <div class="kv"><span>Next step</span><div class="fix">Check the crash reason below and correlate with the freeze immediately before it.</div></div>
+      <div class="kv"><span>Signals</span><div><span class="chip">Unresponsive / crash</span><ul class="sig"><li><b>Unresponsive / crash</b> — MAIN process exited unexpectedly (code null, SIGSEGV) — the whole app went down</li></ul></div></div>
+      <div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>22:13:26</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>
     </section>
   <h2>Artifacts</h2>
   <p class="arts"><a href="trace.json">🔬 trace.json (chrome://tracing — call stacks)</a> · <a href="freezes.jsonl">freezes.jsonl</a> · <a href="metrics.jsonl">metrics.jsonl</a> · <a href="renderer-tasks.jsonl">renderer-tasks.jsonl</a></p>

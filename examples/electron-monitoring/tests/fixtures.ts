@@ -11,6 +11,7 @@ import { JsonlWriter } from '../src/util/jsonl.js';
 import { getRunDir, writeMeta } from '../src/runContext.js';
 import { ElectronAppBridge, InspectorBridge, type MainBridge } from '../src/mainBridge.js';
 import { MainInspector } from '../src/mainInspector.js';
+import { watchMainDeath } from '../src/mainDeath.js';
 import { log } from '../src/util/logger.js';
 
 type StepFn = <T>(name: string, fn: () => Promise<T>) => Promise<T>;
@@ -33,6 +34,7 @@ export const test = base.extend<{ app: Harness }>({
     let context: BrowserContext;
     let window: Page;
     let mainBridge: MainBridge | undefined;
+    let tearingDown = false;
 
     if (cfg.launchMode === 'cdp') {
       if (!cfg.cdpEndpoint) throw new Error('LAUNCH_MODE=cdp requires ELECTRON_CDP_ENDPOINT');
@@ -61,6 +63,7 @@ export const test = base.extend<{ app: Harness }>({
       window = await electronApp.firstWindow();
       context = electronApp.context();
       mainBridge = new ElectronAppBridge(electronApp);
+      watchMainDeath(electronApp, runDir, () => tearingDown);
     }
 
     // ponytail: Playwright's context.tracing.start() hangs on an Electron context — skipped.
@@ -93,6 +96,7 @@ export const test = base.extend<{ app: Harness }>({
 
     await use({ window, electronApp, step });
 
+    tearingDown = true;
     await monitor.stop();
     await actionsLog.close();
     const video = cfg.recordVideo ? window.video() : undefined;

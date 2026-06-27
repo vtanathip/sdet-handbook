@@ -7,6 +7,7 @@ import { startRun, writeMeta, readMeta } from './runContext.js';
 import { buildReport } from './report.js';
 import { ElectronAppBridge, InspectorBridge, type MainBridge } from './mainBridge.js';
 import { MainInspector } from './mainInspector.js';
+import { watchMainDeath } from './mainDeath.js';
 import { log } from './util/logger.js';
 
 // WATCH MODE — interactive, no scripted scenario.
@@ -38,6 +39,7 @@ function installClickCapture(): void {
 async function main(): Promise<void> {
   const cfg = loadConfig();
   const runDir = startRun();
+  let stopping = false; // also gates main-death detection (a clean stop is not a crash)
 
   let electronApp: ElectronApplication | undefined;
   let page: Page;
@@ -61,6 +63,7 @@ async function main(): Promise<void> {
     electronApp = await electron.launch({ args: [cfg.appPath], env: env as Record<string, string> });
     page = await electronApp.firstWindow();
     mainBridge = new ElectronAppBridge(electronApp);
+    watchMainDeath(electronApp, runDir, () => stopping);
   }
 
   // Under tsx, esbuild rewrites evaluated functions with a `__name` helper that doesn't exist in the
@@ -109,7 +112,6 @@ async function main(): Promise<void> {
   log('info', `run dir: ${runDir}`);
   log('info', '────────────────────────────────────────────────────────');
 
-  let stopping = false;
   const finish = async (reason: string): Promise<void> => {
     if (stopping) return;
     stopping = true;

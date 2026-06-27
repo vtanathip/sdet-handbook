@@ -13,6 +13,7 @@ import { MainLoopLag } from './detectors/mainLoopLag.js';
 import { AppMetrics } from './detectors/appMetrics.js';
 import { NativeSignals } from './detectors/nativeSignals.js';
 import { IpcFlood } from './detectors/ipcFlood.js';
+import { Subprocess } from './detectors/subprocess.js';
 import { DeepEvidence } from './detectors/deepEvidence.js';
 import { log } from './util/logger.js';
 import type { Page } from 'playwright';
@@ -39,7 +40,7 @@ export class Monitor {
     // (Playwright in source mode, or a Node inspector attach in cdp+inspect mode).
     this.detectors.push(new RendererHeartbeat(ctx), new RendererTasks(ctx), new JsErrors(ctx), new StallWatch(ctx), new StorageDisk(ctx), new DeepEvidence(ctx));
     if (opts.mainBridge) {
-      this.detectors.push(new MainLoopLag(ctx), new AppMetrics(ctx), new NativeSignals(ctx), new IpcFlood(ctx));
+      this.detectors.push(new MainLoopLag(ctx), new AppMetrics(ctx), new NativeSignals(ctx), new IpcFlood(ctx), new Subprocess(ctx));
     } else {
       log('warn', 'no main-process channel: layers main-loop, hardware, native are unavailable (plain cdp without --inspect)');
     }

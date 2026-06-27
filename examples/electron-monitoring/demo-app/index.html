@@ -31,7 +31,10 @@
       <button class="fail" data-testid="stall-fetch">Stuck request (never resolves)</button>
       <button class="caution" data-testid="storage-fill">Fill localStorage (~4MB)</button>
       <button class="caution" data-testid="js-error">JS error (uncaught + console)</button>
+      <button class="caution" data-testid="subproc-hang">Spawn child (hangs)</button>
+      <button class="fail" data-testid="subproc-crash">Spawn child (crashes)</button>
       <button class="fail" data-testid="crash">Crash renderer</button>
+      <button class="fail" data-testid="crash-main">Crash MAIN process</button>
       <button class="ok" data-testid="no-freeze">No freeze (control)</button>
     </div>
     <div id="log"></div>
@@ -77,15 +80,20 @@
           }
         },
         'stall-fetch': () => window.freeze.stallFetch(),
-        'storage-fill': () => {
-          try { const big = 'x'.repeat(64 * 1024); for (let i = 0; i < 64; i++) localStorage.setItem('em-fill-' + i, big); } catch (e) { log('storage: ' + e.message); }
+        'storage-fill': async () => {
+          // Cache API counts toward navigator.storage.estimate() (localStorage does not).
+          try { const c = await caches.open('em-fill'); await c.put('/em-big', new Response('x'.repeat(4 * 1024 * 1024))); }
+          catch (e) { log('storage: ' + e.message); }
         },
         'js-error': () => {
           console.error('demo console error');
           // setTimeout so the throw escapes this click handler's try/catch and is truly uncaught
           setTimeout(() => { throw new Error('demo uncaught exception'); }, 0);
         },
+        'subproc-hang': () => window.freeze.spawnChild('hang'),
+        'subproc-crash': () => window.freeze.spawnChild('crash'),
         'crash': () => window.freeze.crash(),
+        'crash-main': () => window.freeze.crashMain(),
         'no-freeze': () => {
           const rows = document.getElementById('rows');
           const frag = document.createDocumentFragment();

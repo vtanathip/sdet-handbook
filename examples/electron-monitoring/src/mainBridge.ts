@@ -14,6 +14,8 @@ import type { MainInspector } from './mainInspector.js';
 export interface ProcSample { pid: number; type: string; cpu: number; mem: number }
 export interface NativeEvt { kind: string; t: number; details?: unknown }
 export interface JsErr { kind: string; message: string; stack: string }
+export interface ChildEvt { kind: string; pid: number; cmd: string; code?: number; signal?: string; message?: string; t: number }
+export interface LiveChild { pid: number; cmd: string; ageMs: number }
 
 export interface MainBridge {
   startEventLoopMonitor(): Promise<void>;
@@ -31,6 +33,11 @@ export interface MainBridge {
   drainMainErrors(): Promise<JsErr[]>;
   /** The app's userData directory (so the harness can check disk free / I/O latency on that volume). */
   getUserDataPath(): Promise<string>;
+  /** Patch child_process to track spawned children. Returns false when unsupported (source mode has
+   *  no `require` in the eval scope — only the inspector channel can do this). */
+  wireChildProcs(): Promise<boolean>;
+  drainChildProcs(): Promise<ChildEvt[]>;
+  readLiveChildren(): Promise<LiveChild[]>;
   close(): Promise<void>;
 }
 
@@ -92,6 +99,10 @@ export class ElectronAppBridge implements MainBridge {
   wireMainErrors(): Promise<void> { return this.run<number>(this.p.mainErrWire).then(() => {}); }
   drainMainErrors(): Promise<JsErr[]> { return this.run<JsErr[]>(this.p.mainErrDrain); }
   getUserDataPath(): Promise<string> { return this.run<string>(this.p.userData); }
+  // child_process patching needs `require`, which isn't in scope for electronApp.evaluate — unsupported.
+  async wireChildProcs(): Promise<boolean> { return false; }
+  async drainChildProcs(): Promise<ChildEvt[]> { return []; }
+  async readLiveChildren(): Promise<LiveChild[]> { return []; }
   async close(): Promise<void> { /* Playwright owns the app lifecycle */ }
 }
 
@@ -111,5 +122,22 @@ export class InspectorBridge implements MainBridge {
   wireMainErrors(): Promise<void> { return this.insp.evaluate<number>(this.p.mainErrWire).then(() => {}); }
   drainMainErrors(): Promise<JsErr[]> { return this.insp.evaluate<JsErr[]>(this.p.mainErrDrain); }
   getUserDataPath(): Promise<string> { return this.insp.evaluate<string>(this.p.userData); }
+  async wireChildProcs(): Promise<boolean> {
+    return (await this.insp.evaluate<boolean>(
+      `(function(){var cp=require('child_process');var g=globalThis;if(g.__cpWired)return true;g.__cpWired=true;g.__cpEvents=[];g.__cpLive={};var seq=0;` +
+      `function track(c,cmd){var id=++seq;g.__cpLive[id]={pid:c.pid,cmd:cmd,startTs:Date.now()};g.__cpEvents.push({kind:'spawn',pid:c.pid,cmd:cmd,t:Date.now()});` +
+      `c.on('exit',function(code,signal){delete g.__cpLive[id];g.__cpEvents.push({kind:'exit',pid:c.pid,cmd:cmd,code:code,signal:signal,t:Date.now()});});` +
+      `c.on('error',function(e){g.__cpEvents.push({kind:'error',pid:c.pid,cmd:cmd,message:String((e&&e.message)||e),t:Date.now()});});}` +
+      `['spawn','fork'].forEach(function(m){var o=cp[m];cp[m]=function(){var c=o.apply(cp,arguments);try{track(c,String(arguments[0]));}catch(_){}return c;};});` +
+      `['exec','execFile'].forEach(function(m){var o=cp[m];cp[m]=function(){var c=o.apply(cp,arguments);try{if(c&&c.pid)track(c,String(arguments[0]));}catch(_){}return c;};});` +
+      `return true;})()`,
+    )) === true;
+  }
+  drainChildProcs(): Promise<ChildEvt[]> {
+    return this.insp.evaluate<ChildEvt[]>('(function(){var g=globalThis;var e=g.__cpEvents||[];g.__cpEvents=[];return e;})()');
+  }
+  readLiveChildren(): Promise<LiveChild[]> {
+    return this.insp.evaluate<LiveChild[]>('(function(){var g=globalThis;var o=[];var now=Date.now();var L=g.__cpLive||{};for(var k in L){o.push({pid:L[k].pid,cmd:L[k].cmd,ageMs:now-L[k].startTs});}return o;})()');
+  }
   close(): Promise<void> { return this.insp.close(); }
 }

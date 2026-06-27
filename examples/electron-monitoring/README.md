@@ -20,6 +20,11 @@ An Electron app can freeze for very different reasons, and a single probe can't 
 | L4 hardware | [appMetrics.ts](src/detectors/appMetrics.ts) | per-process **CPU / memory / GPU** | `app.getAppMetrics()` |
 | L5 native | [nativeSignals.ts](src/detectors/nativeSignals.ts) | Chromium **unresponsive** / renderer **crash** | `webContents` events, `render-process-gone` |
 | L7 IPC flush | [ipcFlood.ts](src/detectors/ipcFlood.ts) | **IPC flood / backpressure** (renderer→main `send` storm that won't drain) | `ipcMain.emit` counter |
+| L8 stall | [stallWatch.ts](src/detectors/stallWatch.ts) | **stuck async op** (spinner that never resolves while CPU is idle) | CDP `Network` in-flight age |
+| JS errors | [jsErrors.ts](src/detectors/jsErrors.ts) | uncaught exceptions / unhandledrejection / console errors (renderer + main) | `pageerror`/`console` + main `uncaughtException` |
+| Storage | [storageDisk.ts](src/detectors/storageDisk.ts) | storage quota / disk-low / slow-disk | `storage.estimate()` + `statfs` + I/O canary |
+| Subprocess | [subprocess.ts](src/detectors/subprocess.ts) | `child_process` spawn that **hangs or crashes** | child_process patch (cdp+inspect only) |
+| Main death | [mainDeath.ts](src/mainDeath.ts) | the **whole app dies** (uncaught main exception, OOM, SIGKILL) | `electronApp.process` exit (source mode) |
 | L6 deep evidence | [deepEvidence.ts](src/detectors/deepEvidence.ts) | the **hung call stack** | CDP `Tracing` → `trace.json` (with embedded CPU samples) |
 
 Each detector emits onto a shared bus; the reporter merges overlapping detections into freeze
@@ -83,7 +88,14 @@ intentionally hang.
 | Memory balloon | ~720MB of arrays | L4 | CAUTION |
 | GPU / paint stall | heavy synchronous canvas | L2, L4 | CAUTION |
 | Crash renderer | `forcefullyCrashRenderer()` | L5 | FAIL |
+| Crash MAIN process | `process.crash()` in main | main-death | FAIL |
+| Stuck request | `fetch('hang://…')` that never resolves | L8 | FAIL |
+| Storage fill | write to Cache API | Storage* | CAUTION |
+| JS error | uncaught exception + console.error | JS errors | (advisory) |
+| Spawn child (hangs/crashes) | `child_process.spawn` sleep / exit 7 | Subprocess† | CAUTION/FAIL |
 | No freeze | append 1000 rows | — | PASS |
+
+\* Storage-pressure needs a real `http(s)`/custom-secure origin — Chromium reports 0 usage for `file://`, so the demo only exercises the sampler. † Subprocess tracking needs **cdp+inspect** (`require` isn't reachable in source-mode `evaluate`).
 
 ## Point it at your real app
 
@@ -115,7 +127,8 @@ gives all layers.
 
 **Env knobs:** `RECORD_VIDEO=1` adds a `video.webm` (off by default — `recordVideo` can jam Electron's
 CDP pipe in headless/displayless environments); `FREEZE_THRESHOLD_MS`, `MAIN_LOOP_MAX_MS`,
-`METRICS_INTERVAL_MS`, `DEEP_EVIDENCE_MIN_MS`, `IPC_STORM_MSGS` tune detection. The harness auto-strips
+`METRICS_INTERVAL_MS`, `DEEP_EVIDENCE_MIN_MS`, `IPC_STORM_MSGS`, `STALL_MS`, `STORAGE_PCT`,
+`DISK_LOW_BYTES`, `IO_SLOW_MS`, `SUBPROCESS_HUNG_MS` tune detection. The harness auto-strips
 `ELECTRON_RUN_AS_NODE` before launching (set by some Electron-based IDEs/CI runners; left in place it
 makes Electron run as plain Node and reject Chromium flags).
 
