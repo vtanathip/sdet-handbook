@@ -11,11 +11,12 @@ export function correlate(
 ): FreezeEvent[] {
   return freezes.map((f) => {
     const t = Date.parse(f.startIso);
-    const hit = actions.find((a) => {
-      const s = Date.parse(a.startIso) - toleranceMs;
-      const e = Date.parse(a.endIso) + toleranceMs;
-      return t >= s && t <= e;
-    });
+    // Among actions whose window contains the freeze, pick the most-recent one (latest start).
+    // For scripted step() windows (non-overlapping) this is the only match; for watch-mode click
+    // windows (which can overlap) it blames the closest preceding click.
+    const hit = actions
+      .filter((a) => t >= Date.parse(a.startIso) - toleranceMs && t <= Date.parse(a.endIso) + toleranceMs)
+      .sort((a, b) => Date.parse(b.startIso) - Date.parse(a.startIso))[0];
     return { ...f, action: hit ? hit.name : '(idle / between steps)' };
   });
 }

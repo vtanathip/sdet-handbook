@@ -51,6 +51,21 @@ For a CI gate that exits with the verdict code (0 PASS / 1 CAUTION / 2 FAIL):
 npm run signoff
 ```
 
+## Watch mode — reproduce a freeze by hand
+
+When you don't have a scripted repro, attach the monitor and drive the app yourself:
+
+```bash
+npm run watch                                  # launches ./demo-app (or ELECTRON_APP_PATH)
+# … the app opens; click around and reproduce the freeze …
+# Ctrl+C  → writes the same report.html + .md
+```
+
+It keeps all detectors running the whole time, **captures your clicks** so each freeze is blamed on
+the button you pressed, and writes the report on stop. Attach to a packaged build the same way
+(`LAUNCH_MODE=cdp …`, plus `ELECTRON_INSPECT_ENDPOINT` for the main-process layers). Set
+`WATCH_MAX_SECONDS=N` to auto-stop instead of Ctrl+C (useful in CI).
+
 ## The demo app
 
 [demo-app/](demo-app/) is a tiny Electron app with one button per freeze type (the analog of
