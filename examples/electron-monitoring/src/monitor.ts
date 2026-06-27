@@ -7,6 +7,8 @@ import { JsonlWriter } from './util/jsonl.js';
 import { RendererHeartbeat } from './detectors/rendererHeartbeat.js';
 import { RendererTasks } from './detectors/rendererTasks.js';
 import { JsErrors } from './detectors/jsErrors.js';
+import { StallWatch } from './detectors/stallWatch.js';
+import { StorageDisk } from './detectors/storageDisk.js';
 import { MainLoopLag } from './detectors/mainLoopLag.js';
 import { AppMetrics } from './detectors/appMetrics.js';
 import { NativeSignals } from './detectors/nativeSignals.js';
@@ -35,7 +37,7 @@ export class Monitor {
     };
     // Renderer + deep layers work over any channel; main-process layers need a MainBridge
     // (Playwright in source mode, or a Node inspector attach in cdp+inspect mode).
-    this.detectors.push(new RendererHeartbeat(ctx), new RendererTasks(ctx), new JsErrors(ctx), new DeepEvidence(ctx));
+    this.detectors.push(new RendererHeartbeat(ctx), new RendererTasks(ctx), new JsErrors(ctx), new StallWatch(ctx), new StorageDisk(ctx), new DeepEvidence(ctx));
     if (opts.mainBridge) {
       this.detectors.push(new MainLoopLag(ctx), new AppMetrics(ctx), new NativeSignals(ctx), new IpcFlood(ctx));
     } else {

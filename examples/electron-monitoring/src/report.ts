@@ -96,29 +96,44 @@ function readJsonl<T>(path: string): T[] {
   return readFileSync(path, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as T);
 }
 
-/** Merge detector events whose time windows overlap (within gapMs) into single incidents. */
+// Synchronous freeze/crash layers describe ONE freeze and merge together; the async/advisory layers
+// (stall, js-error, storage, subprocess) are different kinds of signal and must NOT be swallowed into
+// a freeze just because their (often long) window overlaps it — each merges only with its own kind.
+const FREEZE_GROUP = new Set<FreezeLayer>(['renderer-heartbeat', 'renderer-task', 'main-loop', 'hardware', 'native', 'ipc']);
+const groupOf = (l: FreezeLayer): string => (FREEZE_GROUP.has(l) ? 'freeze' : l);
+
+/** Merge detector events whose time windows overlap (within gapMs) into single incidents, per group. */
 export function mergeIncidents(freezes: FreezeEvent[], gapMs = 500): Incident[] {
-  const sorted = [...freezes].sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso));
+  const groups = new Map<string, FreezeEvent[]>();
+  for (const f of freezes) {
+    const g = groupOf(f.layer);
+    (groups.get(g) ?? groups.set(g, []).get(g)!).push(f);
+  }
   const incidents: Incident[] = [];
-  for (const f of sorted) {
-    const start = Date.parse(f.startIso);
-    const end = start + f.durationMs;
-    const cur = incidents[incidents.length - 1];
-    const curEnd = cur ? Date.parse(cur.endIso) : -Infinity;
-    if (cur && start <= curEnd + gapMs) {
-      if (end > curEnd) cur.endIso = new Date(end).toISOString();
-      cur.durationMs = Date.parse(cur.endIso) - Date.parse(cur.startIso);
-      if (!cur.layers.includes(f.layer)) cur.layers.push(f.layer);
-      cur.events.push(f);
-      if (cur.action === '(idle / between steps)' && f.action) cur.action = f.action;
-    } else {
-      incidents.push({
-        startIso: f.startIso, endIso: new Date(end).toISOString(), durationMs: f.durationMs,
-        layers: [f.layer], severity: f.severity, peakCpuPct: 0, peakCpuProc: '',
-        action: f.action ?? '(idle / between steps)', events: [f],
-      });
+  for (const evs of groups.values()) {
+    const sorted = evs.sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso));
+    let cur: Incident | undefined;
+    for (const f of sorted) {
+      const start = Date.parse(f.startIso);
+      const end = start + f.durationMs;
+      const curEnd = cur ? Date.parse(cur.endIso) : -Infinity;
+      if (cur && start <= curEnd + gapMs) {
+        if (end > curEnd) cur.endIso = new Date(end).toISOString();
+        cur.durationMs = Date.parse(cur.endIso) - Date.parse(cur.startIso);
+        if (!cur.layers.includes(f.layer)) cur.layers.push(f.layer);
+        cur.events.push(f);
+        if (cur.action === '(idle / between steps)' && f.action) cur.action = f.action;
+      } else {
+        cur = {
+          startIso: f.startIso, endIso: new Date(end).toISOString(), durationMs: f.durationMs,
+          layers: [f.layer], severity: f.severity, peakCpuPct: 0, peakCpuProc: '',
+          action: f.action ?? '(idle / between steps)', events: [f],
+        };
+        incidents.push(cur);
+      }
     }
   }
+  incidents.sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso));
   for (const inc of incidents) {
     const bySpan = severityFor(inc.durationMs);
     const byEvent = inc.events.reduce<Severity>((a, e) => (SEV_RANK[e.severity] > SEV_RANK[a] ? e.severity : a), 'MINOR');

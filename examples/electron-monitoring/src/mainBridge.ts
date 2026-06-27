@@ -29,6 +29,8 @@ export interface MainBridge {
   /** Capture uncaught exceptions / unhandled rejections in the MAIN process. */
   wireMainErrors(): Promise<void>;
   drainMainErrors(): Promise<JsErr[]>;
+  /** The app's userData directory (so the harness can check disk free / I/O latency on that volume). */
+  getUserDataPath(): Promise<string>;
   close(): Promise<void>;
 }
 
@@ -63,6 +65,7 @@ function probes(E: string) {
       `process.on('uncaughtException',function(e){g.__jserr.push({kind:'main-uncaughtException',message:String((e&&e.message)||e),stack:String((e&&e.stack)||'')});});` +
       `process.on('unhandledRejection',function(r){g.__jserr.push({kind:'main-unhandledRejection',message:String((r&&r.message)||r),stack:String((r&&r.stack)||'')});});return 0;})()`,
     mainErrDrain: `(function(){var g=globalThis;var e=g.__jserr||[];g.__jserr=[];return e;})()`,
+    userData: `${E}.app.getPath('userData')`,
   };
 }
 
@@ -88,6 +91,7 @@ export class ElectronAppBridge implements MainBridge {
   readIpcDelta(): Promise<number> { return this.run<number>(this.p.readIpc); }
   wireMainErrors(): Promise<void> { return this.run<number>(this.p.mainErrWire).then(() => {}); }
   drainMainErrors(): Promise<JsErr[]> { return this.run<JsErr[]>(this.p.mainErrDrain); }
+  getUserDataPath(): Promise<string> { return this.run<string>(this.p.userData); }
   async close(): Promise<void> { /* Playwright owns the app lifecycle */ }
 }
 
@@ -106,5 +110,6 @@ export class InspectorBridge implements MainBridge {
   readIpcDelta(): Promise<number> { return this.insp.evaluate<number>(this.p.readIpc); }
   wireMainErrors(): Promise<void> { return this.insp.evaluate<number>(this.p.mainErrWire).then(() => {}); }
   drainMainErrors(): Promise<JsErr[]> { return this.insp.evaluate<JsErr[]>(this.p.mainErrDrain); }
+  getUserDataPath(): Promise<string> { return this.insp.evaluate<string>(this.p.userData); }
   close(): Promise<void> { return this.insp.close(); }
 }

@@ -8,6 +8,10 @@ const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
 test('freeze sweep — exercises every detection layer', async ({ app }) => {
   const { window, step } = app;
 
+  // L8: kick off a request that never resolves — it stays in-flight the whole run (>stall threshold).
+  await step('click Stuck request', () => window.getByTestId('stall-fetch').click());
+  await settle(300);
+
   // L1 + L2: a 4s renderer busy-loop. click() resolves only after the thread frees (~4s),
   // so the action window naturally spans the freeze.
   await step('click Freeze 4s', () => window.getByTestId('renderer-block-4s').click());
@@ -51,6 +55,10 @@ test('freeze sweep — exercises every detection layer', async ({ app }) => {
 
   // L2 + L4: heavy synchronous paint loop (~1.5s).
   await step('click GPU stall', () => window.getByTestId('gpu-stall').click());
+  await settle(800);
+
+  // L_storage: write a few MB to localStorage (usage shows in navigator.storage.estimate).
+  await step('click Storage fill', () => window.getByTestId('storage-fill').click());
   await settle(800);
 
   // JS error (no freeze/crash) — advisory signal.

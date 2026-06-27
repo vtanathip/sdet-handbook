@@ -1,8 +1,14 @@
 // Freeze-trigger demo app — the Electron analog of process-watchdog's Freeze4s VBA macros.
 // Each renderer button intentionally hangs some part of the stack so the harness can prove
 // every detection layer fires. DO NOT copy these patterns into a real app.
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol } = require('electron');
 const path = require('node:path');
+
+// A custom protocol whose handler never resolves — a fetch to it hangs in-flight forever (the
+// "spinner that never resolves" case). Must be registered before app is ready.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'hang', privileges: { standard: true, supportFetchAPI: true, corsEnabled: true } },
+]);
 
 function busyLoop(ms) {
   const t = Date.now();
@@ -54,6 +60,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  protocol.handle('hang', () => new Promise(() => {})); // never resolves → request stays in-flight
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
