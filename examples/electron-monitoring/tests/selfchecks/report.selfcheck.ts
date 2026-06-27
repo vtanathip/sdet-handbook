@@ -18,6 +18,10 @@ export function run(): void {
     JSON.stringify({ layer: 'renderer-task', startIso: iso(160), durationMs: 4100, severity: 'SEVERE', detail: { kind: 'loaf', scripts: [{ sourceURL: 'app.js', functionName: 'onClick', charPos: 42, duration: 4100 }] } }) + '\n');
   writeFileSync(join(dir, 'metrics.jsonl'),
     JSON.stringify({ ts: iso(2000), samples: [{ pid: 1, type: 'Tab', cpu: 96, mem: 1000 }] }) + '\n');
+  // App-domain breadcrumbs: one just before the freeze (kept), one 5 min earlier (out of window).
+  writeFileSync(join(dir, 'breadcrumbs.jsonl'),
+    JSON.stringify({ ts: iso(-300_000), where: 'renderer', level: 'log', text: 'app started' }) + '\n' +
+    JSON.stringify({ ts: iso(120), where: 'renderer', level: 'log', text: 'rendering invoice #4821' }) + '\n');
 
   const result = buildReport(dir, {
     sessionStartIso: iso(0), sessionEndIso: iso(5000),
@@ -29,6 +33,8 @@ export function run(): void {
   assert.equal(result.incidents.length, 1, 'overlapping events merge into one incident');
   assert.deepEqual([...result.incidents[0].layers].sort(), ['renderer-heartbeat', 'renderer-task']);
   assert.equal(result.incidents[0].peakCpuPct, 96, 'peak CPU pulled from metrics window');
+  assert.deepEqual(result.incidents[0].breadcrumbs?.map((b) => b.text), ['rendering invoice #4821'],
+    'only the in-window breadcrumb is attached (the 5-min-old one is dropped)');
 
   const md = readFileSync(result.mdPath, 'utf8');
   assert.ok(md.includes('click Freeze 4s'), 'md has triggering action');
@@ -36,6 +42,7 @@ export function run(): void {
   assert.ok(md.includes('## Diagnosis'), 'md has plain-English diagnosis');
   assert.ok(md.includes('onClick'), 'md has root-cause script attribution');
   assert.ok(md.includes('Next step:'), 'md has a fix suggestion');
+  assert.ok(md.includes('rendering invoice #4821'), 'md shows app-domain breadcrumbs before the freeze');
 
   const html = readFileSync(result.htmlPath, 'utf8');
   assert.ok(html.includes('tl-fill'), 'html has the timeline');
@@ -43,4 +50,5 @@ export function run(): void {
   assert.ok(html.includes('click Freeze 4s'), 'html names the triggering action');
   assert.ok(html.includes('onClick'), 'html has root-cause script attribution');
   assert.ok(html.includes('Next step'), 'html has a fix suggestion');
+  assert.ok(html.includes('rendering invoice #4821'), 'html shows app-domain breadcrumbs');
 }

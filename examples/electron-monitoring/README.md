@@ -26,6 +26,7 @@ An Electron app can freeze for very different reasons, and a single probe can't 
 | Subprocess | [subprocess.ts](src/detectors/subprocess.ts) | `child_process` spawn that **hangs or crashes** | child_process patch (cdp+inspect only) |
 | Main death | [mainDeath.ts](src/mainDeath.ts) | the **whole app dies** (uncaught main exception, OOM, SIGKILL) | `electronApp.process` exit (source mode) |
 | L6 deep evidence | [deepEvidence.ts](src/detectors/deepEvidence.ts) | the **hung call stack** | CDP `Tracing` → `trace.json` (with embedded CPU samples) |
+| Breadcrumbs | [breadcrumbs.ts](src/detectors/breadcrumbs.ts) | **app-domain context** — the app's own log lines, shown "just before" each freeze (the one thing a probe can't infer) | `page.on('console')`, all levels → `breadcrumbs.jsonl` |
 
 Each detector emits onto a shared bus; the reporter merges overlapping detections into freeze
 *incidents*, attributes each to the in-flight `step()`, and renders the report.
@@ -96,6 +97,8 @@ intentionally hang.
 | No freeze | append 1000 rows | — | PASS |
 
 \* Storage-pressure needs a real `http(s)`/custom-secure origin — Chromium reports 0 usage for `file://`, so the demo only exercises the sampler. † Subprocess tracking needs **cdp+inspect** (`require` isn't reachable in source-mode `evaluate`).
+
+A few triggers also `console.log` a domain-style line first (e.g. *"rendering 4000 line items for invoice #4821"*); the report shows those **breadcrumbs "just before"** the freeze, so you see what the app thought it was doing when it hung — the app-domain context a probe can't infer. Point this at your real app and its own `console`/`electron-log` output flows in automatically.
 
 ## Point it at your real app
 

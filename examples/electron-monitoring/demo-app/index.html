@@ -51,9 +51,11 @@
       }
 
       const handlers = {
-        'renderer-block-4s': () => busyLoop(4000),
+        // A few handlers log domain-style breadcrumbs first — the report shows these "just before" the
+        // freeze, the app-domain context a probe can't infer. (A real app's own console.log/electron-log.)
+        'renderer-block-4s': () => { console.log('[orders] rendering 4000 line items for invoice #4821'); busyLoop(4000); },
         'renderer-block-2s': () => busyLoop(2000),
-        'main-busy-3s': () => window.freeze.mainBusy(3000),
+        'main-busy-3s': () => { console.info('[ledger] reconciling 12k transactions with server…'); window.freeze.mainBusy(3000); },
         'sync-deadlock': () => window.freeze.syncDeadlock(3000),
         'ipc-flood': () => window.freeze.ipcFlood(50000),
         'ipc-jumbo': () => window.freeze.ipcJumbo(1500000),
@@ -79,7 +81,7 @@
             i++;
           }
         },
-        'stall-fetch': () => window.freeze.stallFetch(),
+        'stall-fetch': () => { console.log('[api] GET /reports/quarterly — awaiting response…'); window.freeze.stallFetch(); },
         'storage-fill': async () => {
           // Cache API counts toward navigator.storage.estimate() (localStorage does not).
           try { const c = await caches.open('em-fill'); await c.put('/em-big', new Response('x'.repeat(4 * 1024 * 1024))); }
