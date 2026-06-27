@@ -1,0 +1,27 @@
+{
+  "name": "electron-monitoring",
+  "version": "1.0.0",
+  "description": "Playwright-driven Electron freeze-detection harness. Runs scenarios against an Electron app, detects freezes across 6 layers (renderer UI thread, longtask/LoAF attribution, main-process event loop, hardware CPU/mem/GPU, native unresponsive, deep CDP evidence), correlates each freeze to the UI action that triggered it, and emits a Markdown sign-off report + visual HTML timeline.",
+  "type": "module",
+  "scripts": {
+    "dev": "electron demo-app",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "signoff": "tsx src/signoff.ts",
+    "selfcheck": "tsx src/util/run-selfchecks.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "report": "playwright show-report"
+  },
+  "keywords": ["electron", "playwright", "freeze", "monitoring", "sdet"],
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@types/node": "^24.0.0",
+    "electron": "^31.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.3",
+    "zod": "^4.3.6"
+  }
+}

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Freeze Demo</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; background: #1e1e1e; color: #ddd; }
+      h1 { font-size: 1.3rem; }
+      .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; max-width: 640px; }
+      button { padding: 0.9rem; font-size: 1rem; border: 1px solid #555; border-radius: 6px;
+               background: #2d2d2d; color: #eee; cursor: pointer; }
+      button:hover { background: #3a3a3a; }
+      .fail { border-color: #c0392b; }
+      .caution { border-color: #d68910; }
+      .ok { border-color: #27ae60; }
+      #log { margin-top: 1rem; font-family: monospace; font-size: 0.85rem; color: #888; }
+      #rows div { padding: 1px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Electron Freeze Demo</h1>
+    <div class="grid">
+      <button class="fail" data-testid="renderer-block-4s">Renderer block 4s (FAIL)</button>
+      <button class="caution" data-testid="renderer-block-2s">Renderer block 2s (CAUTION)</button>
+      <button class="fail" data-testid="main-busy-3s">Main busy 3s (FAIL)</button>
+      <button class="fail" data-testid="sync-deadlock">Sync-IPC deadlock 3s (FAIL)</button>
+      <button class="caution" data-testid="mem-balloon">Memory balloon</button>
+      <button class="caution" data-testid="gpu-stall">GPU / paint stall</button>
+      <button class="fail" data-testid="crash">Crash renderer</button>
+      <button class="ok" data-testid="no-freeze">No freeze (control)</button>
+    </div>
+    <div id="log"></div>
+    <div id="rows"></div>
+
+    <script>
+      const logEl = document.getElementById('log');
+      const log = (m) => { logEl.textContent = m; };
+      const held = []; // keep mem-balloon allocations alive
+
+      function busyLoop(ms) {
+        const t = Date.now();
+        while (Date.now() - t < ms) { /* block renderer main thread */ }
+      }
+
+      const handlers = {
+        'renderer-block-4s': () => busyLoop(4000),
+        'renderer-block-2s': () => busyLoop(2000),
+        'main-busy-3s': () => window.freeze.mainBusy(3000),
+        'sync-deadlock': () => window.freeze.syncDeadlock(3000),
+        'mem-balloon': () => {
+          // Allocate enough in one shot to cross the 2x growth threshold within this step's window.
+          for (let i = 0; i < 24; i++) held.push(new Uint8Array(30 * 1024 * 1024).fill(1));
+          log('allocated ~720MB');
+        },
+        'gpu-stall': () => {
+          // Bounded synchronous canvas work (~1.2s) — blocks the renderer main thread without the
+          // runaway GPU backlog that an accumulating blur filter would create.
+          const c = document.createElement('canvas');
+          c.width = 1200; c.height = 1200;
+          const ctx = c.getContext('2d');
+          const t = Date.now();
+          let i = 0;
+          while (Date.now() - t < 1200) {
+            ctx.fillStyle = 'hsl(' + (i % 360) + ',70%,50%)';
+            ctx.fillRect(0, 0, 1200, 1200);
+            ctx.fillStyle = '#000';
+            ctx.font = '32px sans-serif';
+            for (let k = 0; k < 150; k++) ctx.fillText('stall ' + i, (i * 7) % 1100, (k * 8) % 1100);
+            i++;
+          }
+        },
+        'crash': () => window.freeze.crash(),
+        'no-freeze': () => {
+          const rows = document.getElementById('rows');
+          const frag = document.createDocumentFragment();
+          for (let i = 0; i < 1000; i++) {
+            const d = document.createElement('div');
+            d.textContent = 'row ' + i;
+            frag.appendChild(d);
+          }
+          rows.replaceChildren(frag);
+        },
+      };
+
+      for (const btn of document.querySelectorAll('button[data-testid]')) {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.testid;
+          log('running ' + id + '…');
+          try { handlers[id](); } catch (e) { log('error: ' + e.message); }
+        });
+      }
+    </script>
+  </body>
+</html>
