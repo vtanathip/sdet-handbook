@@ -19,6 +19,8 @@ export interface Incident {
 export interface ReportMeta {
   sessionStartIso: string; sessionEndIso: string;
   appLabel: string; launchMode: string; thresholdMs: number; loafSupported: boolean;
+  /** whether the main-process layers (L3/L4/L5) were reachable this run */
+  mainLayers: boolean;
 }
 
 export interface ReportResult {
@@ -72,7 +74,7 @@ function peakCpu(inc: Incident, metrics: MetricSample[]): number {
   for (const m of metrics) {
     const t = Date.parse(m.ts);
     if (t < lo || t > hi) continue;
-    for (const s of m.samples) if (s.cpu > peak) peak = s.cpu;
+    for (const s of m.samples ?? []) if (s.cpu > peak) peak = s.cpu;
   }
   return +peak.toFixed(1);
 }
@@ -143,7 +145,8 @@ function renderMarkdown(a: {
   L.push(`| Session End | ${end.toTimeString().slice(0, 8)} |`);
   L.push(`| Duration | ${fmtDur(end.getTime() - start.getTime())} |`);
   L.push(`| App | ${meta.appLabel} |`);
-  L.push(`| Launch Mode | ${meta.launchMode}${meta.launchMode === 'cdp' ? ' (main-process layers unavailable)' : ''} |`);
+  L.push(`| Launch Mode | ${meta.launchMode}${meta.mainLayers ? '' : ' (main-process layers L3/L4/L5 unavailable)'} |`);
+  L.push(`| Main-process layers | ${meta.mainLayers ? 'available' : 'unavailable (plain cdp — add --inspect)'} |`);
   L.push(`| LoAF attribution | ${meta.loafSupported ? 'available' : 'unavailable (longtask only)'} |`);
   L.push(`| Freeze Threshold | ${meta.thresholdMs}ms |`);
   L.push(`| **Verdict** | **${VERDICT_EMOJI[verdict]} ${verdict}** |`, '');

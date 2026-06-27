@@ -29,6 +29,14 @@ ipcMain.on('crash', (e) => {
   e.sender.forcefullyCrashRenderer();
 });
 
+// IPC flood target: a cheap handler hit thousands of times saturates the main event loop (L3/L7).
+let ipcHits = 0;
+ipcMain.on('em-ipc-noop', () => { ipcHits++; });
+
+// Jumbo IPC payload: deserializing a large structured clone blocks the main thread (L3); the
+// renderer blocked while serializing it (L1).
+ipcMain.handle('em-ipc-echo', (_e, data) => (data ? data.length : 0));
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 900,

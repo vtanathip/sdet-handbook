@@ -21,7 +21,7 @@ export function run(): void {
 
   const result = buildReport(dir, {
     sessionStartIso: iso(0), sessionEndIso: iso(5000),
-    appLabel: './demo-app', launchMode: 'source', thresholdMs: 200, loafSupported: true,
+    appLabel: './demo-app', launchMode: 'source', thresholdMs: 200, loafSupported: true, mainLayers: true,
   });
 
   assert.equal(result.verdict, 'FAIL', 'a 4.2s freeze is FAIL');

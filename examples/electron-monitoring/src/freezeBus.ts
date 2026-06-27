@@ -6,6 +6,7 @@ export type FreezeLayer =
   | 'main-loop'
   | 'hardware'
   | 'native'
+  | 'ipc'
   | 'deep';
 
 export type Severity = 'MINOR' | 'MODERATE' | 'SEVERE';

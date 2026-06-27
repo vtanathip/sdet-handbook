@@ -27,6 +27,20 @@ test('freeze sweep — exercises every detection layer', async ({ app }) => {
   await step('click Sync deadlock', () => window.getByTestId('sync-deadlock').click());
   await settle(800);
 
+  // L7 (+ L1/L3): flood main with 50k IPC sends — the IPC queue can't flush fast enough.
+  await step('click IPC flood', async () => {
+    await window.getByTestId('ipc-flood').click();
+    await settle(2000);
+  });
+  await settle(800);
+
+  // L1 + L3: a jumbo IPC payload blocks both sides on structured-clone serialization.
+  await step('click IPC jumbo', async () => {
+    await window.getByTestId('ipc-jumbo').click();
+    await settle(1500);
+  });
+  await settle(800);
+
   // L4: memory balloon — no UI freeze, just rising workingSetSize. Hold the step open long enough
   // for the 250ms metrics poller to observe the jump and attribute it to this action.
   await step('click Memory balloon', async () => {

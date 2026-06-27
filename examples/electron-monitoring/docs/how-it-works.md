@@ -44,6 +44,7 @@ JSONL back, so report generation is fully decoupled and unit-testable (see the `
 | **L3** main-loop lag | a `setInterval(50ms)` timer in the main process measures how late it fires vs schedule (the lateness = time the loop was blocked), polled + reset each interval | `max lag > 200ms` | `MAIN_LOOP_MAX_MS` |
 | **L4** hardware | `app.getAppMetrics()` per-process `cpu.percentCPUUsage` + `memory.workingSetSize`, streamed to `metrics.jsonl` | sustained CPU > 90% for >2s, or memory growth ratio > 2.0 | `cpuPctThreshold`, `memGrowthRatio` |
 | **L5** native | `webContents` `unresponsive`/`responsive`, `app` `render-process-gone`/`child-process-gone` | unresponsive→responsive bracket; crash = SEVERE | Chromium-internal (~tens of s) |
+| **L7** IPC flush | `ipcMain.emit` is patched in the main process to count renderer→main `send` traffic; polled + reset each interval | messages/interval ≥ threshold = an IPC storm the queue can't flush | `IPC_STORM_MSGS` (1000) |
 | **L6** deep evidence | CDP `Tracing` for the whole run, with category `disabled-by-default-v8.cpu_profiler` so the trace embeds CPU samples → `trace.json` | always captured | — |
 
 ### Why the heartbeat reads the gap *after* recovery
@@ -91,11 +92,22 @@ suite and then exits with the verdict code for CI gating.
 
 ## Launch modes
 
-- **source** (`electron.launch({ args: [appPath] })`) — all six layers. Use for the demo and any app
-  you can run from source.
-- **cdp** (`chromium.connectOverCDP`) — for a packaged binary started with
-  `--remote-debugging-port`. Only renderer layers (L1/L2/L6) are available; main-process layers
-  (L3/L4/L5) need `electronApp.evaluate`, which CDP doesn't expose. The report marks them unavailable.
+The renderer and the main process speak **different debug protocols**, so the harness reaches them
+through a `MainBridge` abstraction with two implementations:
+
+- **source** (`electron.launch({ args: [appPath] })`) — Playwright owns the app; the bridge is
+  `ElectronAppBridge` (uses `electronApp.evaluate`). **All seven layers.** Use for the demo and any
+  app you can run from source.
+- **cdp** (`chromium.connectOverCDP`) — for a packaged binary. The renderer is reached over the
+  Chromium `--remote-debugging-port`; that alone gives the renderer layers (L1/L2/L6). To get the
+  main-process layers (L3/L4/L5/L7) you **also** launch the app with `--inspect=<port>` and set
+  `ELECTRON_INSPECT_ENDPOINT` — the bridge becomes `InspectorBridge`, attaching a Node-inspector
+  client to the main process (it reaches `require('electron')` via the inspector's command-line API).
+  Without `--inspect`, the main-process layers are marked unavailable in the report.
+
+The detectors are channel-agnostic: they call `MainBridge` methods, and each bridge phrases the same
+probe for its channel (Playwright's `evaluate(fn)` with the electron module as arg, vs. the
+inspector's `Runtime.evaluate(expr)` with `require`).
 
 ## Caveats
 

@@ -24,6 +24,8 @@
       <button class="caution" data-testid="renderer-block-2s">Renderer block 2s (CAUTION)</button>
       <button class="fail" data-testid="main-busy-3s">Main busy 3s (FAIL)</button>
       <button class="fail" data-testid="sync-deadlock">Sync-IPC deadlock 3s (FAIL)</button>
+      <button class="fail" data-testid="ipc-flood">IPC flood (50k sends)</button>
+      <button class="caution" data-testid="ipc-jumbo">IPC jumbo payload (1.5M objects)</button>
       <button class="caution" data-testid="mem-balloon">Memory balloon</button>
       <button class="caution" data-testid="gpu-stall">GPU / paint stall</button>
       <button class="fail" data-testid="crash">Crash renderer</button>
@@ -47,6 +49,8 @@
         'renderer-block-2s': () => busyLoop(2000),
         'main-busy-3s': () => window.freeze.mainBusy(3000),
         'sync-deadlock': () => window.freeze.syncDeadlock(3000),
+        'ipc-flood': () => window.freeze.ipcFlood(50000),
+        'ipc-jumbo': () => window.freeze.ipcJumbo(1500000),
         'mem-balloon': () => {
           // Allocate enough in one shot to cross the 2x growth threshold within this step's window.
           for (let i = 0; i < 24; i++) held.push(new Uint8Array(30 * 1024 * 1024).fill(1));

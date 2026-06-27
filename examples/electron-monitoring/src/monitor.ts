@@ -2,15 +2,17 @@ import { join } from 'node:path';
 import { FreezeBus, type FreezeEvent } from './freezeBus.js';
 import type { Config } from './config.js';
 import type { Detector, DetectorCtx } from './detector.js';
+import type { MainBridge } from './mainBridge.js';
 import { JsonlWriter } from './util/jsonl.js';
 import { RendererHeartbeat } from './detectors/rendererHeartbeat.js';
 import { RendererTasks } from './detectors/rendererTasks.js';
 import { MainLoopLag } from './detectors/mainLoopLag.js';
 import { AppMetrics } from './detectors/appMetrics.js';
 import { NativeSignals } from './detectors/nativeSignals.js';
+import { IpcFlood } from './detectors/ipcFlood.js';
 import { DeepEvidence } from './detectors/deepEvidence.js';
 import { log } from './util/logger.js';
-import type { ElectronApplication, Page } from 'playwright';
+import type { Page } from 'playwright';
 
 // Constructs + start/stops every detector (the monitoringBundle analog). Owns freezes.jsonl:
 // every event any detector pushes onto the bus is appended here, which the reporter reads back.
@@ -18,22 +20,25 @@ export class Monitor {
   private readonly bus = new FreezeBus();
   private readonly detectors: Detector[] = [];
   private readonly freezes: JsonlWriter;
+  private readonly mainBridge?: MainBridge;
   readonly events: FreezeEvent[] = [];
 
-  constructor(opts: { page: Page; electronApp?: ElectronApplication; config: Config; runDir: string }) {
+  constructor(opts: { page: Page; mainBridge?: MainBridge; config: Config; runDir: string }) {
+    this.mainBridge = opts.mainBridge;
     this.freezes = new JsonlWriter(join(opts.runDir, 'freezes.jsonl'));
     this.bus.onFreeze((ev) => { this.events.push(ev); void this.freezes.append(ev); });
 
     const ctx: DetectorCtx = {
-      page: opts.page, electronApp: opts.electronApp, bus: this.bus,
+      page: opts.page, mainBridge: opts.mainBridge, bus: this.bus,
       config: opts.config, runDir: opts.runDir,
     };
-    // Renderer + deep layers work in both modes; main-process layers need electronApp (source mode).
+    // Renderer + deep layers work over any channel; main-process layers need a MainBridge
+    // (Playwright in source mode, or a Node inspector attach in cdp+inspect mode).
     this.detectors.push(new RendererHeartbeat(ctx), new RendererTasks(ctx), new DeepEvidence(ctx));
-    if (opts.electronApp) {
-      this.detectors.push(new MainLoopLag(ctx), new AppMetrics(ctx), new NativeSignals(ctx));
+    if (opts.mainBridge) {
+      this.detectors.push(new MainLoopLag(ctx), new AppMetrics(ctx), new NativeSignals(ctx), new IpcFlood(ctx));
     } else {
-      log('warn', 'cdp mode: main-process layers (main-loop, hardware, native) are unavailable');
+      log('warn', 'no main-process channel: layers main-loop, hardware, native are unavailable (plain cdp without --inspect)');
     }
   }
 
@@ -54,6 +59,7 @@ export class Monitor {
         new Promise<void>((r) => setTimeout(() => { log('warn', `stop ${d.name} timed out`); r(); }, 7000)),
       ]);
     }
+    await this.mainBridge?.close().catch(() => {});
     await this.freezes.close();
   }
 }

@@ -20,6 +20,7 @@ export default function globalTeardown(): void {
     launchMode: (m.launchMode as string) ?? cfg.launchMode,
     thresholdMs: cfg.heartbeatMs,
     loafSupported: (m.loafSupported as boolean) ?? false,
+    mainLayers: (m.mainLayers as boolean) ?? false,
   });
 
   writeFileSync(join(dir, 'result.json'), JSON.stringify({ verdict: result.verdict, exitCode: result.exitCode }, null, 2));

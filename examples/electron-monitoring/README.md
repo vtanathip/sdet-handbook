@@ -19,6 +19,7 @@ An Electron app can freeze for very different reasons, and a single probe can't 
 | L3 main-loop lag | [mainLoopLag.ts](src/detectors/mainLoopLag.ts) | **main process** event loop stalled (stalls all windows/IPC) | main-process timer lateness |
 | L4 hardware | [appMetrics.ts](src/detectors/appMetrics.ts) | per-process **CPU / memory / GPU** | `app.getAppMetrics()` |
 | L5 native | [nativeSignals.ts](src/detectors/nativeSignals.ts) | Chromium **unresponsive** / renderer **crash** | `webContents` events, `render-process-gone` |
+| L7 IPC flush | [ipcFlood.ts](src/detectors/ipcFlood.ts) | **IPC flood / backpressure** (renderer→main `send` storm that won't drain) | `ipcMain.emit` counter |
 | L6 deep evidence | [deepEvidence.ts](src/detectors/deepEvidence.ts) | the **hung call stack** | CDP `Tracing` → `trace.json` (with embedded CPU samples) |
 
 Each detector emits onto a shared bus; the reporter merges overlapping detections into freeze
@@ -41,6 +42,9 @@ cat  runs/<timestamp>/electron-freeze-report-*.md   # CI sign-off
 #   it embeds CPU samples, so the hung call stack is in there.
 ```
 
+See a captured example: [docs/sample-report.md](docs/sample-report.md) (and the
+[HTML timeline](docs/sample-report.html) — artifact links there are per-run, not bundled).
+
 For a CI gate that exits with the verdict code (0 PASS / 1 CAUTION / 2 FAIL):
 
 ```bash
@@ -59,7 +63,9 @@ intentionally hang.
 | Renderer block 2s | 2s renderer busy-loop | L1, L2 | CAUTION |
 | Main busy 3s | IPC → main busy-loop | L3, L4 | FAIL |
 | Sync-IPC deadlock | `sendSync` into a blocked handler | L1, L3 | FAIL |
-| Memory balloon | ~240MB of arrays | L4 | CAUTION |
+| IPC flood | 50k `send` in a burst (queue can't flush) | L7 (+L1/L3 if heavy) | FAIL |
+| IPC jumbo payload | `invoke` a 1.5M-object structured clone | L1, L3 | CAUTION |
+| Memory balloon | ~720MB of arrays | L4 | CAUTION |
 | GPU / paint stall | heavy synchronous canvas | L2, L4 | CAUTION |
 | Crash renderer | `forcefullyCrashRenderer()` | L5 | FAIL |
 | No freeze | append 1000 rows | — | PASS |
@@ -72,17 +78,29 @@ Everything is config-driven (see [src/config.ts](src/config.ts)); defaults targe
 # From source (full 6-layer coverage):
 ELECTRON_APP_PATH=/path/to/your/app npm test
 
-# Packaged binary over CDP — launch it yourself with --remote-debugging-port=9222 first:
-LAUNCH_MODE=cdp ELECTRON_CDP_ENDPOINT=http://127.0.0.1:9222 npm test
+# Packaged binary — launch it yourself with BOTH ports, then attach:
+#   YourApp.exe --remote-debugging-port=9222 --inspect=9229
+LAUNCH_MODE=cdp \
+  ELECTRON_CDP_ENDPOINT=http://127.0.0.1:9222 \
+  ELECTRON_INSPECT_ENDPOINT=http://127.0.0.1:9229 \
+  npm test
 ```
 
-**CDP mode caveat:** renderer layers (L1/L2/L6) work, but the main-process layers (L3/L4/L5) need
-`electronApp.evaluate`, which CDP can't reach — the report marks them *unavailable*. Run from source
-when you can.
+**Two ports, all layers.** The renderer is Chromium (`--remote-debugging-port`); the main process is
+Node (`--inspect`). With **both**, the harness attaches a CDP session to the renderer *and* a
+Node-inspector session to the main process, so **all seven layers work on a packaged app**.
+
+If you give only `--remote-debugging-port` (no `--inspect`), the main-process layers (L3/L4/L5/L7) are
+dark — the report marks them *unavailable (plain cdp — add --inspect)*. Running **from source** also
+gives all layers.
+
+> `--inspect` is respected by packaged apps unless the `EnableNodeCliInspectArguments` Electron fuse
+> was disabled. If `http://127.0.0.1:9229/json` is empty, the build has it off — use source mode, or
+> have the app open a debug port itself.
 
 **Env knobs:** `RECORD_VIDEO=1` adds a `video.webm` (off by default — `recordVideo` can jam Electron's
 CDP pipe in headless/displayless environments); `FREEZE_THRESHOLD_MS`, `MAIN_LOOP_MAX_MS`,
-`METRICS_INTERVAL_MS`, `DEEP_EVIDENCE_MIN_MS` tune detection. The harness auto-strips
+`METRICS_INTERVAL_MS`, `DEEP_EVIDENCE_MIN_MS`, `IPC_STORM_MSGS` tune detection. The harness auto-strips
 `ELECTRON_RUN_AS_NODE` before launching (set by some Electron-based IDEs/CI runners; left in place it
 makes Electron run as plain Node and reject Chromium flags).
 
