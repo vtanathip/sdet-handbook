@@ -53,6 +53,10 @@ test('freeze sweep — exercises every detection layer', async ({ app }) => {
   await step('click GPU stall', () => window.getByTestId('gpu-stall').click());
   await settle(800);
 
+  // JS error (no freeze/crash) — advisory signal.
+  await step('click JS error', () => window.getByTestId('js-error').click());
+  await settle(800);
+
   // Control: no freeze.
   await step('click No freeze', () => window.getByTestId('no-freeze').click());
   await settle(500);

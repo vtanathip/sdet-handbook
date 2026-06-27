@@ -13,6 +13,7 @@ import type { MainInspector } from './mainInspector.js';
 
 export interface ProcSample { pid: number; type: string; cpu: number; mem: number }
 export interface NativeEvt { kind: string; t: number; details?: unknown }
+export interface JsErr { kind: string; message: string; stack: string }
 
 export interface MainBridge {
   startEventLoopMonitor(): Promise<void>;
@@ -25,6 +26,9 @@ export interface MainBridge {
   startIpcCounter(): Promise<void>;
   /** Messages counted since the last read, then reset. */
   readIpcDelta(): Promise<number>;
+  /** Capture uncaught exceptions / unhandled rejections in the MAIN process. */
+  wireMainErrors(): Promise<void>;
+  drainMainErrors(): Promise<JsErr[]>;
   close(): Promise<void>;
 }
 
@@ -54,6 +58,11 @@ function probes(E: string) {
       `(function(){var i=${E}.ipcMain;var g=globalThis;if(g.__ipcWrapped)return 0;g.__ipcWrapped=true;g.__ipcCount=0;` +
       `var orig=i.emit.bind(i);i.emit=function(){g.__ipcCount++;return orig.apply(i,arguments);};return 0;})()`,
     readIpc: `(function(){var g=globalThis;var c=g.__ipcCount||0;g.__ipcCount=0;return c;})()`,
+    mainErrWire:
+      `(function(){var g=globalThis;g.__jserr=g.__jserr||[];if(g.__jserrWired)return 0;g.__jserrWired=true;` +
+      `process.on('uncaughtException',function(e){g.__jserr.push({kind:'main-uncaughtException',message:String((e&&e.message)||e),stack:String((e&&e.stack)||'')});});` +
+      `process.on('unhandledRejection',function(r){g.__jserr.push({kind:'main-unhandledRejection',message:String((r&&r.message)||r),stack:String((r&&r.stack)||'')});});return 0;})()`,
+    mainErrDrain: `(function(){var g=globalThis;var e=g.__jserr||[];g.__jserr=[];return e;})()`,
   };
 }
 
@@ -77,6 +86,8 @@ export class ElectronAppBridge implements MainBridge {
   drainNative(): Promise<NativeEvt[]> { return this.run<NativeEvt[]>(this.p.drainNative); }
   startIpcCounter(): Promise<void> { return this.run<number>(this.p.startIpc).then(() => {}); }
   readIpcDelta(): Promise<number> { return this.run<number>(this.p.readIpc); }
+  wireMainErrors(): Promise<void> { return this.run<number>(this.p.mainErrWire).then(() => {}); }
+  drainMainErrors(): Promise<JsErr[]> { return this.run<JsErr[]>(this.p.mainErrDrain); }
   async close(): Promise<void> { /* Playwright owns the app lifecycle */ }
 }
 
@@ -93,5 +104,7 @@ export class InspectorBridge implements MainBridge {
   drainNative(): Promise<NativeEvt[]> { return this.insp.evaluate<NativeEvt[]>(this.p.drainNative); }
   startIpcCounter(): Promise<void> { return this.insp.evaluate<number>(this.p.startIpc).then(() => {}); }
   readIpcDelta(): Promise<number> { return this.insp.evaluate<number>(this.p.readIpc); }
+  wireMainErrors(): Promise<void> { return this.insp.evaluate<number>(this.p.mainErrWire).then(() => {}); }
+  drainMainErrors(): Promise<JsErr[]> { return this.insp.evaluate<JsErr[]>(this.p.mainErrDrain); }
   close(): Promise<void> { return this.insp.close(); }
 }

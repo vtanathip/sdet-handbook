@@ -7,6 +7,10 @@ export type FreezeLayer =
   | 'hardware'
   | 'native'
   | 'ipc'
+  | 'js-error'    // uncaught exception / unhandledrejection / console error (renderer or main)
+  | 'stall'       // async-but-idle: hung request / unresolved invoke (loop alive, CPU low)
+  | 'storage'     // storage usage/quota or disk pressure
+  | 'subprocess'  // child_process spawn/exit/hang lifecycle
   | 'deep';
 
 export type Severity = 'MINOR' | 'MODERATE' | 'SEVERE';

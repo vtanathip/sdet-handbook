@@ -61,6 +61,26 @@ const LAYER_INFO: Record<FreezeLayer, { label: string; what: string; fix: string
     what: 'The renderer sent IPC messages faster than the main process could drain them (backpressure) — the queue could not flush.',
     fix: 'Batch or throttle ipcRenderer.send; coalesce per-event chatter into fewer, larger messages.',
   },
+  'js-error': {
+    label: 'JavaScript error',
+    what: 'Code threw an uncaught exception / unhandled rejection (or logged an error). The app may be in a broken state even though it did not freeze or crash.',
+    fix: 'Read the message + stack below and fix the throw. A preload throw means your exposed API never loaded — check the preload and contextBridge wiring.',
+  },
+  stall: {
+    label: 'Stuck operation (spinner)',
+    what: 'An async operation never completed while the app kept running and CPU stayed idle — the classic “spinner that never resolves”: a hung request, an IPC reply that never came, or a stuck page load.',
+    fix: 'Add a timeout / AbortController to the request or IPC call below; make sure every handler eventually resolves or rejects.',
+  },
+  storage: {
+    label: 'Storage / disk pressure',
+    what: 'Storage usage approached its quota, disk space ran low, or disk I/O was slow — any of which can stall or crash the app.',
+    fix: 'Prune storage and handle QuotaExceededError; make sure the userData volume has free space and is not a slow/locked (network/AV-scanned) drive.',
+  },
+  subprocess: {
+    label: 'Subprocess problem',
+    what: 'A child process the app spawned hung past its expected time or exited abnormally — the feature waiting on it can freeze.',
+    fix: 'See the command + pid below: add a timeout/kill, drain stdout/stderr to avoid a pipe-buffer deadlock, and handle non-zero exits.',
+  },
   deep: { label: 'Deep trace', what: '', fix: '' },
 };
 
@@ -119,10 +139,15 @@ function peakCpu(inc: Incident, metrics: MetricSample[]): { pct: number; proc: s
   return { pct: +pct.toFixed(1), proc };
 }
 
+// Freeze/crash-class layers gate the sign-off. Advisory layers (js-error, storage, subprocess) are
+// surfaced in the report but only escalate the verdict when SEVERE (a crash, disk-full, or a crashed
+// child) — so a routine console.error or a near-quota warning doesn't flip a clean run.
+const GATING_LAYERS: FreezeLayer[] = ['renderer-heartbeat', 'renderer-task', 'main-loop', 'hardware', 'native', 'ipc', 'stall'];
 function verdictOf(incidents: Incident[]): { verdict: ReportResult['verdict']; exitCode: number } {
   if (incidents.length === 0) return { verdict: 'PASS', exitCode: 0 };
   if (incidents.some((i) => i.severity === 'SEVERE')) return { verdict: 'FAIL', exitCode: 2 };
-  return { verdict: 'CAUTION', exitCode: 1 };
+  if (incidents.some((i) => i.layers.some((l) => GATING_LAYERS.includes(l)))) return { verdict: 'CAUTION', exitCode: 1 };
+  return { verdict: 'PASS', exitCode: 0 };
 }
 
 // ── formatting helpers ───────────────────────────────────────────────────────────────────────────
@@ -181,6 +206,17 @@ function evidenceLine(e: FreezeEvent): string {
       return `${String(d.kind)}${reason}`;
     }
     case 'ipc': return `${String(d.msgs)} IPC messages in one interval (~${String(d.ratePerSec)}/s)`;
+    case 'js-error': return `${String(d.kind)}${d.where ? ` [${String(d.where)}]` : ''}: ${String(d.message ?? '')}`;
+    case 'stall': return `${String(d.kind ?? 'operation')} stuck ${Math.round(Number(d.ageMs ?? e.durationMs) / 1000)}s${d.target ? ` — ${String(d.target)}` : ''}`;
+    case 'storage':
+      if (d.kind === 'storage-pressure') return `storage at ${String(d.pct)}% of quota (${fmtMB(Number(d.usageKB))} / ${fmtMB(Number(d.quotaKB))})`;
+      if (d.kind === 'disk-low') return `disk low: ${fmtMB(Number(d.freeKB))} free on the userData volume`;
+      if (d.kind === 'slow-disk') return `slow disk: ${String(d.ms)}ms for a tiny write to userData`;
+      return 'storage/disk pressure';
+    case 'subprocess':
+      if (d.kind === 'subprocess-hung') return `child still running after ${Math.round(Number(d.ageMs) / 1000)}s: ${String(d.cmd)} (pid ${String(d.pid)})`;
+      if (d.kind === 'subprocess-crashed') return `child exited abnormally: ${String(d.cmd)} (code ${String(d.code)}${d.signal ? `, ${String(d.signal)}` : ''})`;
+      return 'subprocess problem';
     default: return `${e.durationMs}ms`;
   }
 }
