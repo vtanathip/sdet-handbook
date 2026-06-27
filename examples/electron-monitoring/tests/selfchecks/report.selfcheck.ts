@@ -33,8 +33,14 @@ export function run(): void {
   const md = readFileSync(result.mdPath, 'utf8');
   assert.ok(md.includes('click Freeze 4s'), 'md has triggering action');
   assert.ok(md.includes('FAIL'), 'md has verdict');
+  assert.ok(md.includes('## Diagnosis'), 'md has plain-English diagnosis');
+  assert.ok(md.includes('onClick'), 'md has root-cause script attribution');
+  assert.ok(md.includes('Next step:'), 'md has a fix suggestion');
 
   const html = readFileSync(result.htmlPath, 'utf8');
-  assert.ok(html.includes('class="bar freeze'), 'html has a freeze bar');
-  assert.ok(html.includes('onClick'), 'html has LoAF script attribution');
+  assert.ok(html.includes('tl-fill'), 'html has the timeline');
+  assert.ok(html.includes('class="card'), 'html has freeze cards');
+  assert.ok(html.includes('click Freeze 4s'), 'html names the triggering action');
+  assert.ok(html.includes('onClick'), 'html has root-cause script attribution');
+  assert.ok(html.includes('Next step'), 'html has a fix suggestion');
 }
