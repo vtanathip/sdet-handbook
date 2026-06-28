@@ -17,6 +17,9 @@ export interface Incident {
   action: string; events: FreezeEvent[]; breadcrumbs?: Breadcrumb[];
   // Ranking (filled in buildReport): how confident we are this is a real bug, and whether it's noise.
   confidence?: number; confidenceReasons?: string[]; noise?: boolean;
+  // Baseline comparison (filled when a baseline is loaded): is this freeze new/worse/within the
+  // known-good run? This is what makes the verdict app-relative instead of a static absolute.
+  vsBaseline?: 'new' | 'worse' | 'within'; baselineWorstMs?: number;
 }
 
 export interface ReportMeta {
@@ -174,8 +177,53 @@ function peakCpu(inc: Incident, metrics: MetricSample[]): { pct: number; proc: s
 // surfaced in the report but only escalate the verdict when SEVERE (a crash, disk-full, or a crashed
 // child) — so a routine console.error or a near-quota warning doesn't flip a clean run.
 const GATING_LAYERS: FreezeLayer[] = ['renderer-heartbeat', 'renderer-task', 'main-loop', 'hardware', 'native', 'ipc', 'stall'];
-function verdictOf(incidents: Incident[]): { verdict: ReportResult['verdict']; exitCode: number } {
+
+// ── Baseline: gate on REGRESSION vs a known-good run, not a static absolute ─────────────────────────
+// The perception-anchored absolutes (>=3s = SEVERE, 200ms = a freeze) come from HCI research (Nielsen
+// 0.1/1/10s, RAIL, Web Vitals) and stay as the default floor. But app-relative numbers (IPC rate,
+// memory growth, "how slow is too slow for THIS app") have no universal value — so we record a green
+// run's distribution as a baseline and flag only freezes that are NEW or materially WORSE than it.
+export interface Baseline {
+  createdIso: string;
+  longestMs: number;
+  totalMs: number;
+  incidentCount: number;
+  byLayer: Record<string, { count: number; worstMs: number }>; // worst freeze per primary layer
+}
+export function summarizeBaseline(incidents: Incident[], createdIso: string): Baseline {
+  const byLayer: Record<string, { count: number; worstMs: number }> = {};
+  let longestMs = 0, totalMs = 0;
+  for (const i of incidents) {
+    longestMs = Math.max(longestMs, i.durationMs);
+    totalMs += i.durationMs;
+    const k = primaryLayer(i);
+    const b = byLayer[k] ?? (byLayer[k] = { count: 0, worstMs: 0 });
+    b.count++; b.worstMs = Math.max(b.worstMs, i.durationMs);
+  }
+  return { createdIso, longestMs, totalMs, incidentCount: incidents.length, byLayer };
+}
+const isCrash = (inc: Incident): boolean =>
+  inc.events.some((e) => e.layer === 'native' && /gone/.test(String((e.detail as { kind?: string }).kind ?? '')));
+// new = a freeze on a layer the green run never had; worse = exceeds the green worst by > tolerance.
+function classifyVsBaseline(inc: Incident, baseline: Baseline, tol: number): 'new' | 'worse' | 'within' {
+  if (isCrash(inc)) return 'new'; // a crash is never "expected"
+  const b = baseline.byLayer[primaryLayer(inc)];
+  if (!b || b.count === 0) return 'new';
+  if (inc.durationMs > b.worstMs * tol) return 'worse';
+  return 'within';
+}
+
+function verdictOf(incidents: Incident[], baseline?: Baseline): { verdict: ReportResult['verdict']; exitCode: number } {
   if (incidents.length === 0) return { verdict: 'PASS', exitCode: 0 };
+  // Baseline mode: gate on regressions (new/worse than green) + crashes — within-baseline is expected.
+  if (baseline) {
+    const regressions = incidents.filter((i) => i.vsBaseline && i.vsBaseline !== 'within');
+    if (regressions.length === 0) return { verdict: 'PASS', exitCode: 0 };
+    if (regressions.some((i) => isCrash(i) || i.severity === 'SEVERE')) return { verdict: 'FAIL', exitCode: 2 };
+    if (regressions.some((i) => i.layers.some((l) => GATING_LAYERS.includes(l)))) return { verdict: 'CAUTION', exitCode: 1 };
+    return { verdict: 'PASS', exitCode: 0 };
+  }
+  // No baseline: perception-anchored absolutes.
   if (incidents.some((i) => i.severity === 'SEVERE')) return { verdict: 'FAIL', exitCode: 2 };
   if (incidents.some((i) => i.layers.some((l) => GATING_LAYERS.includes(l)))) return { verdict: 'CAUTION', exitCode: 1 };
   return { verdict: 'PASS', exitCode: 0 };
@@ -368,7 +416,9 @@ function confidenceOf(inc: Incident): { score: number; reasons: string[] } {
   return { score, reasons };
 }
 function impactRank(inc: Incident): number {
-  return SEV_RANK[inc.severity] * 100 + Math.min(99, Math.round(inc.durationMs / 100));
+  // A regression vs baseline outranks any within-baseline freeze, however severe — that's the point.
+  const regression = inc.vsBaseline && inc.vsBaseline !== 'within' ? 100_000 : 0;
+  return regression + SEV_RANK[inc.severity] * 100 + Math.min(99, Math.round(inc.durationMs / 100));
 }
 const confLabel = (inc: Incident): string => ((inc.confidence ?? 0) >= 3 ? 'high' : (inc.confidence ?? 0) === 2 ? 'medium' : 'low');
 // Signal incidents, worst-first; and the demoted-noise bucket.
@@ -481,10 +531,32 @@ export function buildReport(runDir: string, meta: ReportMeta): ReportResult {
     inc.breadcrumbs = breadcrumbsFor(start, Date.parse(inc.endIso), breadcrumbs, 6, lookback);
     prevEnd = Math.max(prevEnd, Date.parse(inc.endIso));
     const c = confidenceOf(inc);
-    inc.confidence = c.score; inc.confidenceReasons = c.reasons; inc.noise = isLikelyNoise(inc);
+    inc.confidence = c.score; inc.confidenceReasons = c.reasons;
   }
 
-  const { verdict, exitCode } = verdictOf(incidents);
+  // Baseline (optional): tag each incident new/worse/within vs a known-good run so the verdict gates
+  // on REGRESSION rather than a static absolute. BASELINE_FILE = the baseline to compare against;
+  // SAVE_BASELINE = record THIS run as the new baseline; BASELINE_TOLERANCE (default 1.2) = how much
+  // worse than green counts as a regression.
+  const tol = Number(process.env.BASELINE_TOLERANCE) || 1.2;
+  let baseline: Baseline | undefined;
+  const baselineFile = process.env.BASELINE_FILE;
+  if (baselineFile && existsSync(baselineFile)) {
+    try { baseline = JSON.parse(readFileSync(baselineFile, 'utf8')) as Baseline; } catch { /* bad baseline → ignore, fall back to absolutes */ }
+  }
+  for (const inc of incidents) {
+    if (baseline) { inc.vsBaseline = classifyVsBaseline(inc, baseline, tol); inc.baselineWorstMs = baseline.byLayer[primaryLayer(inc)]?.worstMs ?? 0; }
+    // within-baseline freezes are expected → demote them like noise so regressions stand out.
+    inc.noise = isLikelyNoise(inc) || inc.vsBaseline === 'within';
+  }
+  if (process.env.SAVE_BASELINE) {
+    writeFileSync(process.env.SAVE_BASELINE, JSON.stringify(summarizeBaseline(incidents, meta.sessionEndIso), null, 2));
+  }
+  const baselineLabel = baseline
+    ? `vs baseline (green ${baseline.createdIso.slice(0, 10)}, tolerance ${tol}×)`
+    : process.env.SAVE_BASELINE ? `recorded this run as the baseline → ${process.env.SAVE_BASELINE}` : undefined;
+
+  const { verdict, exitCode } = verdictOf(incidents, baseline);
   const longest = incidents.reduce((a, i) => Math.max(a, i.durationMs), 0);
   const total = incidents.reduce((a, i) => a + i.durationMs, 0);
   const avg = incidents.length ? total / incidents.length : 0;
@@ -494,8 +566,8 @@ export function buildReport(runDir: string, meta: ReportMeta): ReportResult {
     trace: existsSync(join(runDir, 'trace.json')),
   };
   const layerFiles = renderLayerReports(runDir, correlated);
-  const md = renderMarkdown({ meta, incidents, verdict, longest, total, avg, rawFreezes, artifacts, layerFiles });
-  const html = renderHtml({ meta, incidents, verdict, longest, total, artifacts, layerFiles });
+  const md = renderMarkdown({ meta, incidents, verdict, longest, total, avg, rawFreezes, artifacts, layerFiles, baselineLabel });
+  const html = renderHtml({ meta, incidents, verdict, longest, total, artifacts, layerFiles, baselineLabel });
 
   const base = `electron-freeze-report-${stamp(meta.sessionStartIso)}`;
   const mdPath = join(runDir, `${base}.md`);
@@ -505,13 +577,18 @@ export function buildReport(runDir: string, meta: ReportMeta): ReportResult {
   return { verdict, exitCode, mdPath, htmlPath, incidents };
 }
 
+// Compact per-incident baseline tag for tables/headers.
+const baselineTag = (i: Incident): string =>
+  i.vsBaseline === 'new' ? '🔺 new' : i.vsBaseline === 'worse' ? `🔺 worse (green ${fmtS1(i.baselineWorstMs ?? 0)})` : i.vsBaseline === 'within' ? '✓ within' : '—';
+
 function renderMarkdown(a: {
   meta: ReportMeta; incidents: Incident[]; verdict: ReportResult['verdict'];
   longest: number; total: number; avg: number; rawFreezes: FreezeEvent[];
-  artifacts: { video: boolean; trace: boolean }; layerFiles: FreezeLayer[];
+  artifacts: { video: boolean; trace: boolean }; layerFiles: FreezeLayer[]; baselineLabel?: string;
 }): string {
   const { meta, incidents, verdict } = a;
   const start = new Date(meta.sessionStartIso), end = new Date(meta.sessionEndIso);
+  const hasBaseline = !!a.baselineLabel && incidents.some((i) => i.vsBaseline);
   const L: string[] = [];
   L.push('# Electron Freeze Watchdog — Sign-off Report', '');
   L.push('| Field | Value |', '|-------|-------|');
@@ -521,6 +598,7 @@ function renderMarkdown(a: {
   L.push(`| Launch Mode | ${meta.launchMode}${meta.mainLayers ? '' : ' (main-process layers L3/L4/L5/L7 unavailable)'} |`);
   L.push(`| Main-process layers | ${meta.mainLayers ? 'available' : 'unavailable (plain cdp — add --inspect)'} |`);
   L.push(`| Freeze Threshold | ${meta.thresholdMs}ms |`);
+  L.push(`| Gate | ${a.baselineLabel ?? 'absolute thresholds (no baseline) — perception-anchored: ≥3s = FAIL'} |`);
   L.push(`| **Verdict** | **${VERDICT_EMOJI[verdict]} ${verdict}** |`, '');
 
   const { signal, noise } = rankIncidents(incidents);
@@ -537,12 +615,16 @@ function renderMarkdown(a: {
       L.push(`- **Look next:** ${whereToLookNext(top)}`, '');
     }
 
+    const hasBaseline = !!a.baselineLabel && incidents.some((i) => i.vsBaseline);
     if (signal.length) {
       L.push('## Freezes by priority', '');
-      L.push('| Rank | When | Triggered by | What froze | Duration | Severity | Confidence |');
-      L.push('|---|------|--------------|-----------|----------|----------|------------|');
+      const bh = hasBaseline ? ' Vs baseline |' : '';
+      const bsep = hasBaseline ? '------------|' : '';
+      L.push(`| Rank | When | Triggered by | What froze | Duration | Severity | Confidence |${bh}`);
+      L.push(`|---|------|--------------|-----------|----------|----------|------------|${bsep}`);
       signal.forEach((i, n) => {
-        L.push(`| ${n + 1} | ${hhmmss(i.startIso)} | ${i.action} | ${LAYER_INFO[primaryLayer(i)].label} | ${fmtS1(i.durationMs)} | ${i.severity} | ${confLabel(i)} |`);
+        const bcol = hasBaseline ? ` ${baselineTag(i)} |` : '';
+        L.push(`| ${n + 1} | ${hhmmss(i.startIso)} | ${i.action} | ${LAYER_INFO[primaryLayer(i)].label} | ${fmtS1(i.durationMs)} | ${i.severity} | ${confLabel(i)} |${bcol}`);
       });
       L.push('');
     }
@@ -551,6 +633,7 @@ function renderMarkdown(a: {
     signal.forEach((i, n) => {
       const p = primaryLayer(i);
       L.push(`### #${n + 1} · ${LAYER_INFO[p].label} · ${fmtS1(i.durationMs)} (${i.severity})`, '');
+      if (i.vsBaseline) L.push(`- **Vs baseline:** ${baselineTag(i)}${i.vsBaseline === 'new' ? ' — the green run had no freeze on this layer' : ''}`);
       L.push(`- **Confidence:** ${confLabel(i)} — ${i.confidenceReasons?.join(' · ')}`);
       L.push(`- **Triggered by:** ${i.action}`);
       L.push(`- **Where (root cause):** ${culprit(i)}`);
@@ -568,9 +651,11 @@ function renderMarkdown(a: {
     });
 
     if (noise.length) {
-      L.push(`## Likely noise (${noise.length})`, '');
-      L.push('Low-confidence: single-layer, not tied to an action, sub-second. Shown for completeness — check these last.', '');
-      for (const i of noise) L.push(`- \`${hhmmss(i.startIso)}\` ${LAYER_INFO[primaryLayer(i)].label} · ${fmtS1(i.durationMs)} · ${i.action}`);
+      L.push(hasBaseline ? `## Within baseline / low-confidence (${noise.length})` : `## Likely noise (${noise.length})`, '');
+      L.push(hasBaseline
+        ? 'Expected (matches the known-good baseline) or low-confidence. Not regressions — check these last.'
+        : 'Low-confidence: single-layer, not tied to an action, sub-second. Shown for completeness — check these last.', '');
+      for (const i of noise) L.push(`- \`${hhmmss(i.startIso)}\` ${LAYER_INFO[primaryLayer(i)].label} · ${fmtS1(i.durationMs)} · ${i.action}${i.vsBaseline ? ` · ${baselineTag(i)}` : ''}`);
       L.push('');
     }
 
@@ -580,11 +665,19 @@ function renderMarkdown(a: {
     L.push(`- **Signals seen:** ${Object.entries(byLayer).map(([k, v]) => `${k} (${v})`).join(', ') || 'none'}`, '');
   }
 
+  // Criteria mirror what verdictOf() actually gates on — no display-only rows that don't affect the
+  // exit code (the old "Total < 10s" row was cosmetic and could disagree with the verdict).
   L.push('## Sign-off Criteria', '');
-  L.push('| Criterion | Threshold | Result |', '|-----------|-----------|--------|');
-  L.push(`| No freezes | 0 | ${check(incidents.length === 0)} ${incidents.length} |`);
-  L.push(`| Longest freeze < 3s | < 3s | ${check(a.longest < 3000)} ${fmtSec(a.longest)} |`);
-  L.push(`| Total freeze time < 10s | < 10s | ${check(a.total < 10000)} ${fmtSec(a.total)} |`, '');
+  L.push('| Criterion | Gate | Result |', '|-----------|------|--------|');
+  if (hasBaseline) {
+    const regr = incidents.filter((i) => i.vsBaseline && i.vsBaseline !== 'within').length;
+    L.push(`| No regressions vs baseline | FAIL on new/worse | ${check(regr === 0)} ${regr} regression(s) |`);
+  } else {
+    const severe = incidents.filter((i) => i.severity === 'SEVERE').length;
+    L.push(`| No freeze ≥3s and no crash | FAIL on any | ${check(severe === 0)} ${severe} severe |`);
+  }
+  L.push(`| Clean — no freezes at all | clean PASS | ${check(incidents.length === 0)} ${incidents.length} incident(s) |`);
+  L.push(`| _Context (not a gate):_ longest ${fmtSec(a.longest)} · total frozen ${fmtSec(a.total)} | — | |`, '');
 
   if (a.layerFiles.length) {
     L.push('## Per-layer detail', '');
@@ -604,7 +697,7 @@ function renderMarkdown(a: {
 
 function renderHtml(a: {
   meta: ReportMeta; incidents: Incident[]; verdict: ReportResult['verdict'];
-  longest: number; total: number; artifacts: { video: boolean; trace: boolean }; layerFiles: FreezeLayer[];
+  longest: number; total: number; artifacts: { video: boolean; trace: boolean }; layerFiles: FreezeLayer[]; baselineLabel?: string;
 }): string {
   const { meta, incidents, verdict } = a;
   const sevClass = (s: Severity) => `sev-${s.toLowerCase()}`;
@@ -643,7 +736,7 @@ function renderHtml(a: {
       : '';
     const conf = `${confLabel(i)} · ${esc(i.confidenceReasons?.join(' · ') ?? '')}`;
     return `<section id="inc${n}" class="card ${sevClass(i.severity)}${i.noise ? ' noise' : ''}">
-      <h3><span class="num">#${n + 1}</span> ${esc(LAYER_INFO[p].label)} · ${fmtS1(i.durationMs)} <span class="badge ${sevClass(i.severity)}">${i.severity}</span><span class="conf conf-${confLabel(i)}">${conf}</span></h3>
+      <h3><span class="num">#${n + 1}</span> ${esc(LAYER_INFO[p].label)} · ${fmtS1(i.durationMs)} <span class="badge ${sevClass(i.severity)}">${i.severity}</span><span class="conf conf-${confLabel(i)}">${conf}</span>${i.vsBaseline ? `<span class="conf">${esc(baselineTag(i))}</span>` : ''}</h3>
       <div class="kv"><span>Triggered by</span><div><b>${esc(i.action)}</b> at ${hhmmss(i.startIso)}</div></div>
       <div class="kv"><span>Root cause</span><div class="cause">${esc(culprit(i))}</div></div>
       <div class="kv"><span>What happened</span><div>${esc(LAYER_INFO[p].what)}</div></div>
@@ -732,6 +825,7 @@ function renderHtml(a: {
     <span><b>Mode:</b> ${esc(meta.launchMode)}${meta.mainLayers ? '' : ' (renderer only — add --inspect for main-process layers)'}</span>
     <span><b>When:</b> ${hhmmss(meta.sessionStartIso)}–${hhmmss(meta.sessionEndIso)}</span>
     <span><b>Threshold:</b> ${meta.thresholdMs}ms</span>
+    <span><b>Gate:</b> ${esc(a.baselineLabel ?? 'absolute (≥3s = FAIL)')}</span>
   </div>
   ${incidents.length === 0 ? '<div class="empty">🎉 Nothing froze. Nice.</div>' : `
   ${startHere}

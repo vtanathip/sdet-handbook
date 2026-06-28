@@ -1,5 +1,6 @@
 node_modules/
 runs/
+freeze-baseline.json
 test-results/
 playwright-report/
 .session

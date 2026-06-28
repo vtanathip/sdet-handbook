@@ -12,7 +12,7 @@ A frozen Electron window has many possible causes, and they need different fixes
 - a renderer **crashed**.
 
 `process-watchdog` answers this for Excel with one Win32 probe (`SendMessageTimeout`). Electron has
-no single equivalent, so this harness runs **six probes at once** and lets the report tell them apart.
+no single equivalent, so this harness runs **a dozen probes at once** and lets the report tell them apart.
 
 ## Architecture
 
@@ -21,7 +21,7 @@ playwright test
   └─ tests/fixtures.ts  (per spec)
        ├─ launch Electron  (electron.launch)  OR  connectOverCDP (packaged)
        ├─ page = electronApp.firstWindow()
-       ├─ Monitor.start()  → 6 detectors, each polling every 250ms, all pushing onto FreezeBus
+       ├─ Monitor.start()  → all detectors, each polling every 250ms, all pushing onto FreezeBus
        │     L1 rendererHeartbeat   L2 rendererTasks    L6 deepEvidence    (renderer / CDP)
        │     L3 mainLoopLag         L4 appMetrics       L5 nativeSignals   (main process)
        ├─ step('click X', …)  → records [start,end] to actions.jsonl
@@ -37,15 +37,15 @@ JSONL back, so report generation is fully decoupled and unit-testable (see the `
 
 ## The layers in detail
 
-| Layer | API | Signal | Default threshold |
-|-------|-----|--------|-------------------|
-| **L1** renderer heartbeat | injected `requestAnimationFrame` + `setInterval(50ms)` ticker recording the largest gap between its own ticks | gap > threshold = UI thread was blocked | `200ms` (`FREEZE_THRESHOLD_MS`) |
-| **L2** task attribution | `PerformanceObserver` on `longtask` (≥50ms) and `long-animation-frame` (LoAF: `blockingDuration` + `scripts[]` → `sourceURL`, function, char position) | task ≥ threshold; all ≥50ms logged to `renderer-tasks.jsonl` | `200ms` to flag |
-| **L3** main-loop lag | a `setInterval(50ms)` timer in the main process measures how late it fires vs schedule (the lateness = time the loop was blocked), polled + reset each interval | `max lag > 200ms` | `MAIN_LOOP_MAX_MS` |
-| **L4** hardware | `app.getAppMetrics()` per-process `cpu.percentCPUUsage` + `memory.workingSetSize`, streamed to `metrics.jsonl` | sustained CPU > 90% for >2s, or memory growth ratio > 2.0 | `cpuPctThreshold`, `memGrowthRatio` |
-| **L5** native | `webContents` `unresponsive`/`responsive`, `app` `render-process-gone`/`child-process-gone` | unresponsive→responsive bracket; crash = SEVERE | Chromium-internal (~tens of s) |
-| **L7** IPC flush | `ipcMain.emit` is patched in the main process to count renderer→main `send` traffic; polled + reset each interval | messages/interval ≥ threshold = an IPC storm the queue can't flush | `IPC_STORM_MSGS` (1000) |
-| **L6** deep evidence | CDP `Tracing` for the whole run, with category `disabled-by-default-v8.cpu_profiler` so the trace embeds CPU samples → `trace.json` | always captured | — |
+| Layer | API | Signal → names | Default threshold |
+|-------|-----|----------------|-------------------|
+| **L1** renderer heartbeat | injected `requestAnimationFrame` + `setInterval(50ms)` ticker recording the largest gap between its own ticks | gap > threshold = UI thread blocked → **which route** + core count | `200ms` (`FREEZE_THRESHOLD_MS`) |
+| **L2** task attribution | `PerformanceObserver` on `longtask` (≥50ms) and `long-animation-frame` (LoAF: phase timestamps + `scripts[]` → `invoker`, `invokerType`, `forcedStyleAndLayoutDuration`, `pauseDuration`) | task ≥ threshold → the **call-site** (`BUTTON#save.onclick`), **script-vs-layout split**, thrash/sync-block hints, all scripts | `200ms` to flag |
+| **L3** main-loop lag | a `setInterval(50ms)` timer measures how late it fires vs schedule; **every `ipcMain.on`/`handle` is wrapped + timed** so a lag spike is matched to the handler that ran during it | `max lag > 200ms` → names the **ipcMain handler** that blocked it (or "no handler → compute/GC/sync-IO") | `MAIN_LOOP_MAX_MS` |
+| **L4** hardware | `app.getAppMetrics()` per-process `cpu.percentCPUUsage`, `memory.workingSetSize`/`peakWorkingSetSize`, `idleWakeupsPerSecond`, `name`, streamed to `metrics.jsonl` (our own L6 Tracing Service is excluded from findings) | sustained CPU >90% for >2s, or per-process memory growth >2.0 → the **specific process + pid** (incl. which utility) | `cpuPctThreshold`, `memGrowthRatio` |
+| **L5** native | `webContents` `unresponsive`/`responsive` (with `wc.id`/url/title), `app` `render-process-gone`/`child-process-gone` (with details) | unresponsive→responsive bracket; crash = SEVERE → the **window** (title+url) or **child process** + reason | Chromium-internal (~tens of s) |
+| **L7** IPC flush | `ipcMain.emit` **and** `ipcMain.handle` patched to count renderer→main traffic **per channel** (send + invoke); polled + reset each interval | messages/interval ≥ threshold → the **flooding channel** + its % share | `IPC_STORM_MSGS` (1000) |
+| **L6** deep evidence | CDP `Tracing` for the whole run, with category `disabled-by-default-v8.cpu_profiler` so the trace embeds CPU samples → `trace.json` (Node-side buffer capped at 300k events) | always captured | — |
 
 ### Why the heartbeat reads the gap *after* recovery
 
@@ -67,28 +67,48 @@ holds the step open with an explicit wait.
 
 ## The report
 
-[report.ts](../src/report.ts) merges overlapping detector events into freeze **incidents** (so one
-click that trips L1 *and* L2 is one row, not two), pulls **peak CPU** for each incident from
-`metrics.jsonl`, and writes:
+[report.ts](../src/report.ts) merges overlapping detector events into freeze **incidents** (one click
+that trips L1 *and* L2 is one row, not two), **ranks** them by confidence, and writes a report that
+leads with the likely bug instead of dumping everything flat:
 
-- **`electron-freeze-report-*.md`** — sign-off table, freeze events (`# | Start | Duration | Peak CPU |
-  Triggering Action | Layer(s) | Severity`), summary, sign-off criteria — mirroring
-  `process-watchdog/ProcessWatchdog/ReportWriter.cs`.
-- **`report.html`** — a time-axis timeline: UI actions on one track, freezes (red bars) on the track
-  below, aligned so the eye lands on the action that froze. Each incident expands to its layers and
-  the LoAF script attribution.
+- **`electron-freeze-report-*.md`**
+  - **🔎 Start here** — the single highest impact × confidence incident, with its root cause + where to look next.
+  - **Freezes by priority** — ranked, with a **confidence** column (corroboration across layers × tied to an action × has a named cause).
+  - **Diagnosis** per incident: root cause sourced from the *primary* layer (so a main-process freeze names **its handler**, not a renderer char-offset — the old `culprit()` bug), **Where to look next** (exact artifact + filter), signals, breadcrumbs.
+  - **Likely noise** — low-confidence idle blips, demoted so they don't bury the real bug.
+  - **Sign-off criteria** that mirror what *actually* gates (no display-only rows that could disagree with the exit code).
+- **`report.html`** — the same as a time-axis timeline (UI actions vs freeze bars), with a Start-here banner and confidence/baseline chips per card.
+- **`layers/<layer>.md`** — a per-layer drill-down for each layer that fired, with a pointer to its raw JSONL stream.
 - **`result.json`** — `{verdict, exitCode}` for `npm run signoff`.
 
-### Verdict (matches process-watchdog)
+### Verdict — perception-anchored, or baseline-relative
+
+The thresholds come from two principled places, never thin air:
+
+- **Perception anchors (default).** `200ms` = a freeze, `≥3s` = SEVERE → FAIL — grounded in HCI research
+  (Nielsen 0.1 / 1 / 10s, Google RAIL, Web Vitals INP). These gate when there's no baseline.
+- **Baseline (app-relative).** For "how slow is too slow for *this* app" there's no universal number, so
+  record a known-good run (`SAVE_BASELINE`) and a later run gates on **regression** (`BASELINE_FILE`):
+  each freeze is tagged `within` (expected → demoted), `new` (a layer the green run never had), or
+  `worse` (past `BASELINE_TOLERANCE`, default 1.2×). A crash is always a regression.
 
 | Condition | Verdict | Exit |
 |-----------|---------|------|
-| no freeze incidents | PASS | 0 |
-| any incident, none ≥ 3s and no crash | CAUTION | 1 |
-| any incident ≥ 3s, or a crash | FAIL | 2 |
+| no freeze (or all within baseline) | PASS | 0 |
+| a freeze, none ≥3s, no crash (or a non-severe regression) | CAUTION | 1 |
+| any freeze ≥3s, a crash, or a severe regression | FAIL | 2 |
 
 Playwright's own exit code only reflects test errors, so [src/signoff.ts](../src/signoff.ts) runs the
 suite and then exits with the verdict code for CI gating.
+
+### Measurement overhead (observer effect)
+
+Measuring perturbs the app, but bounded: renderer-compute overhead is below the noise floor, IPC
+round-trips are ~+8µs each (only matters under a flood), and L6's whole-run CDP `Tracing` is the one
+real cost — tens of MB in the harness + ~120MB in Chromium's separate **Tracing Service** process
+(excluded from L4 findings so the instrument never measures itself). Freeze *timing* (L1/L3) is
+unaffected — separate processes, no thread blocking. Run `npx tsx scripts/bench-overhead.ts` to
+measure it on your machine.
 
 ## Launch modes
 

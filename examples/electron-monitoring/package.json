@@ -7,6 +7,7 @@
     "dev": "electron demo-app",
     "test": "playwright test",
     "test:headed": "playwright test --headed",
+    "baseline": "SAVE_BASELINE=./freeze-baseline.json playwright test",
     "watch": "tsx src/watch.ts",
     "signoff": "tsx src/signoff.ts",
     "selfcheck": "tsx src/util/run-selfchecks.ts",

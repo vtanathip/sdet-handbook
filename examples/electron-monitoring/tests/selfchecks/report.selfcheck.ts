@@ -77,4 +77,37 @@ export function run(): void {
   // the idle console.error must be in the noise bucket, the real freeze in the priority list
   assert.ok(md2.indexOf('Start here') < md2.indexOf('Likely noise'), 'noise sorted below the real bug');
   assert.ok(existsSync(join(dir2, 'layers', 'main-loop.md')), 'per-layer detail report is written');
+
+  // Baseline: gate on REGRESSION vs a known-good run, not a static absolute. Record a green run
+  // (worst renderer-task = 2.0s), then a within-envelope run passes and a materially-worse run fails.
+  const gdir = mkdtempSync(join(tmpdir(), 'em-green-'));
+  const gmeta = { sessionStartIso: iso(0), sessionEndIso: iso(5000), appLabel: './demo-app', launchMode: 'source', thresholdMs: 200, loafSupported: true, mainLayers: true };
+  const script = (ms: number, sev: string) =>
+    JSON.stringify({ layer: 'renderer-task', startIso: iso(150), durationMs: ms, severity: sev, detail: { kind: 'loaf', scripts: [{ sourceURL: 'app.js', functionName: 'render', charPos: 1, duration: ms }] } }) + '\n';
+  writeFileSync(join(gdir, 'freezes.jsonl'), script(2000, 'MODERATE'));
+  const baselinePath = join(gdir, 'baseline.json');
+  try {
+    process.env.SAVE_BASELINE = baselinePath;
+    buildReport(gdir, gmeta);
+    delete process.env.SAVE_BASELINE;
+    assert.ok(existsSync(baselinePath), 'a green run records baseline.json');
+
+    process.env.BASELINE_FILE = baselinePath;
+
+    const wdir = mkdtempSync(join(tmpdir(), 'em-within-'));
+    writeFileSync(join(wdir, 'freezes.jsonl'), script(1900, 'MODERATE')); // ≤ 2.0s × 1.2 → within
+    const within = buildReport(wdir, gmeta);
+    assert.equal(within.incidents[0].vsBaseline, 'within', 'a 1.9s freeze is within the 2.0s baseline envelope');
+    assert.equal(within.verdict, 'PASS', 'within-baseline → PASS (no regression), even though absolute rules would CAUTION');
+
+    const bdir = mkdtempSync(join(tmpdir(), 'em-worse-'));
+    writeFileSync(join(bdir, 'freezes.jsonl'), script(5000, 'SEVERE')); // » 2.0s × 1.2 → worse
+    const worse = buildReport(bdir, gmeta);
+    assert.equal(worse.incidents[0].vsBaseline, 'worse', 'a 5s freeze is materially worse than baseline');
+    assert.equal(worse.verdict, 'FAIL', 'a regression (worse than green) + SEVERE → FAIL');
+    assert.ok(readFileSync(worse.mdPath, 'utf8').includes('Vs baseline'), 'report shows the baseline comparison');
+  } finally {
+    delete process.env.SAVE_BASELINE;
+    delete process.env.BASELINE_FILE;
+  }
 }
