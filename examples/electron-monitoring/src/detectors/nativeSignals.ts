@@ -13,7 +13,9 @@ export class NativeSignals implements Detector {
   readonly name = 'native';
   private timer?: ReturnType<typeof setInterval>;
   private inflight = false;
-  private unresponsiveAt?: number;
+  // Keyed by webContents id so two windows can be unresponsive at once without clobbering each other
+  // (the old single field paired the wrong responsive→unresponsive when >1 window hung).
+  private unresponsive = new Map<number, NativeEvt>();
   constructor(private readonly ctx: DetectorCtx) {}
 
   async start(): Promise<void> {
@@ -35,23 +37,27 @@ export class NativeSignals implements Detector {
   }
 
   private handle(e: NativeEvt): void {
-    if (e.kind === 'unresponsive') { this.unresponsiveAt = e.t; return; }
+    const key = e.wcId ?? -1; // -1 = unknown id (older Electron / source channel single-window)
+    if (e.kind === 'unresponsive') { this.unresponsive.set(key, e); return; }
     if (e.kind === 'responsive') {
-      if (this.unresponsiveAt === undefined) return;
-      const durationMs = e.t - this.unresponsiveAt;
-      this.unresponsiveAt = undefined;
+      const u = this.unresponsive.get(key);
+      if (!u) return;
+      const durationMs = e.t - u.t;
+      this.unresponsive.delete(key);
       this.ctx.bus.emit({
-        layer: 'native', startIso: new Date(e.t - durationMs).toISOString(), durationMs,
-        severity: severityFor(durationMs), detail: { kind: 'unresponsive-bracket' },
+        layer: 'native', startIso: new Date(u.t).toISOString(), durationMs,
+        severity: severityFor(durationMs),
+        detail: { kind: 'unresponsive-bracket', wcId: u.wcId, url: u.url, title: u.title, wcType: u.wcType },
       });
-      log('warn', `[L5] webContents unresponsive ${durationMs}ms`);
+      log('warn', `[L5] ${u.title || u.url || 'window'} unresponsive ${durationMs}ms`);
       return;
     }
     this.ctx.bus.emit({
       layer: 'native', startIso: new Date(e.t).toISOString(), durationMs: 0,
-      severity: 'SEVERE', detail: { kind: e.kind, details: e.details },
+      severity: 'SEVERE',
+      detail: { kind: e.kind, details: e.details, wcId: e.wcId, url: e.url, title: e.title, wcType: e.wcType },
     });
-    log('error', `[L5] ${e.kind}`);
+    log('error', `[L5] ${e.kind}${e.title ? ` — ${e.title}` : ''}`);
   }
 
   async stop(): Promise<void> {

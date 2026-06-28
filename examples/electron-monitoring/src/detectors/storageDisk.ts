@@ -10,7 +10,7 @@ import { log } from '../util/logger.js';
 //    app's userData volume (we only ask the bridge for the path — fs work runs here, sidestepping the
 //    no-require-in-evaluate limit). Needs a main-process channel (source or cdp+inspect) for the path.
 
-interface Estimate { usage?: number; quota?: number }
+interface Estimate { usage?: number; quota?: number; usageDetails?: Record<string, number>; origin?: string }
 
 export class StorageDisk implements Detector {
   readonly name = 'storage';
@@ -37,7 +37,13 @@ export class StorageDisk implements Detector {
     this.inflight = true;
     try {
       const est = (await this.ctx.page
-        .evaluate(() => (navigator.storage?.estimate ? navigator.storage.estimate() : null))
+        .evaluate(() => (navigator.storage?.estimate
+          ? navigator.storage.estimate().then((e) => ({
+              usage: e.usage, quota: e.quota,
+              usageDetails: (e as { usageDetails?: Record<string, number> }).usageDetails,
+              origin: location.origin,
+            }))
+          : null))
         .catch(() => null)) as Estimate | null;
 
       let freeBytes = -1;
@@ -67,9 +73,12 @@ export class StorageDisk implements Detector {
       const pct = est.usage / est.quota;
       if (pct >= this.ctx.config.storagePct) {
         this.pressureEmitted = true;
+        // Name the biggest storage SYSTEM (indexedDB/caches/…) so the engineer knows what to prune.
+        const top = Object.entries(est.usageDetails ?? {}).sort((a, b) => b[1] - a[1])[0];
         this.ctx.bus.emit({
           layer: 'storage', startIso: ts, durationMs: 0, severity: 'MODERATE',
-          detail: { kind: 'storage-pressure', pct: Math.round(pct * 100), usageKB: Math.round(est.usage / 1024), quotaKB: Math.round(est.quota / 1024) },
+          detail: { kind: 'storage-pressure', pct: Math.round(pct * 100), usageKB: Math.round(est.usage / 1024), quotaKB: Math.round(est.quota / 1024),
+            biggest: top ? `${top[0]} ${Math.round(top[1] / 1024)}KB` : '', origin: est.origin },
         });
         log('warn', `[STORAGE] usage ${Math.round(pct * 100)}% of quota`);
       }
@@ -78,7 +87,7 @@ export class StorageDisk implements Detector {
       this.diskLowEmitted = true;
       this.ctx.bus.emit({
         layer: 'storage', startIso: ts, durationMs: 0, severity: 'SEVERE',
-        detail: { kind: 'disk-low', freeKB: Math.round(freeBytes / 1024) },
+        detail: { kind: 'disk-low', freeKB: Math.round(freeBytes / 1024), path: this.userDataPath },
       });
       log('error', `[STORAGE] disk low: ${Math.round(freeBytes / 1024 / 1024)}MB free`);
     }
@@ -86,7 +95,7 @@ export class StorageDisk implements Detector {
       this.slowDiskEmitted = true;
       this.ctx.bus.emit({
         layer: 'storage', startIso: ts, durationMs: 0, severity: 'MODERATE',
-        detail: { kind: 'slow-disk', ms: ioMs },
+        detail: { kind: 'slow-disk', ms: ioMs, path: this.userDataPath },
       });
       log('warn', `[STORAGE] slow disk: ${ioMs}ms for a tiny userData write`);
     }

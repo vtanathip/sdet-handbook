@@ -13,12 +13,28 @@ import { log } from '../util/logger.js';
 // ponytail: memory.workingSetSize semantics differ by OS (Windows private working set vs macOS
 // resident) so we gate on a GROWTH RATIO, never an absolute MB threshold.
 
+// Our own L6 CDP tracing spins up a "Tracing Service" utility process that grows tens of MB over a
+// run — getAppMetrics() sees it like any other process. Exclude it from FINDINGS so the instrument
+// never measures itself (it was firing false memory-balloon + peak-CPU on the Tracing Service). The
+// raw metrics.jsonl keeps it (truthful); only the detection + report attribution drop it. It only
+// exists while we trace, so a name match is safe. (ponytail: name may differ on some platforms.)
+const isInstrumentProc = (s: ProcSample): boolean => s.name === 'Tracing Service';
+
+/** Top N processes by a key (cpu or mem), compacted for a freeze-moment snapshot in the report. */
+function topProcs(samples: ProcSample[], key: 'cpu' | 'mem'): Record<string, unknown>[] {
+  return [...samples]
+    .sort((a, b) => b[key] - a[key])
+    .slice(0, 5)
+    .map((s) => ({ pid: s.pid, type: s.type, name: s.name ?? '', cpuPct: +s.cpu.toFixed(1), memKB: s.mem, peakMemKB: s.peakMem ?? 0, wakeups: s.wakeups ?? 0 }));
+}
+
 export class AppMetrics implements Detector {
   readonly name = 'hardware';
   private timer?: ReturnType<typeof setInterval>;
   private inflight = false;
   private out: JsonlWriter;
-  private baselineMem = 0;
+  // Per-pid memory baseline so a balloon names the SPECIFIC growing process, not just "the app".
+  private memBaseline = new Map<number, { kb: number; name: string; type: string }>();
   private memEmitted = false;
   private highCpuMs = 0;
   private cpuEmitted = false;
@@ -38,9 +54,10 @@ export class AppMetrics implements Detector {
       const samples = await this.ctx.mainBridge.getAppMetrics();
       if (!Array.isArray(samples) || samples.length === 0) return; // transient empty poll — skip
       const ts = new Date().toISOString();
-      await this.out.append({ ts, samples });
-      this.checkMemory(samples, ts);
-      this.checkCpu(samples, ts);
+      await this.out.append({ ts, samples }); // raw stream keeps everything (incl. our instrument)
+      const appSamples = samples.filter((s) => !isInstrumentProc(s)); // findings exclude the instrument
+      this.checkMemory(appSamples, ts);
+      this.checkCpu(appSamples, ts);
     } catch {
       /* app closing — ignore */
     } finally {
@@ -49,16 +66,27 @@ export class AppMetrics implements Detector {
   }
 
   private checkMemory(samples: ProcSample[], ts: string): void {
-    const total = samples.reduce((a, s) => a + s.mem, 0);
-    if (this.baselineMem === 0) { this.baselineMem = total; return; }
-    if (!this.memEmitted && total / this.baselineMem >= this.ctx.config.memGrowthRatio) {
+    // Per-process growth: find the single process that grew most past the ratio — that's the leaker.
+    let culprit: { s: ProcSample; base: number; ratio: number; grewKB: number } | undefined;
+    for (const s of samples) {
+      const prev = this.memBaseline.get(s.pid);
+      if (!prev) { this.memBaseline.set(s.pid, { kb: s.mem, name: s.name ?? '', type: s.type }); continue; }
+      const ratio = prev.kb > 0 ? s.mem / prev.kb : 1;
+      const grewKB = s.mem - prev.kb;
+      if (ratio >= this.ctx.config.memGrowthRatio && (!culprit || grewKB > culprit.grewKB)) {
+        culprit = { s, base: prev.kb, ratio, grewKB };
+      }
+    }
+    if (!this.memEmitted && culprit) {
       this.memEmitted = true;
+      const { s, base, ratio } = culprit;
       this.ctx.bus.emit({
         layer: 'hardware', startIso: ts, durationMs: 0, severity: 'MODERATE',
-        detail: { kind: 'memory-balloon', baselineKB: this.baselineMem, currentKB: total,
-          ratio: +(total / this.baselineMem).toFixed(2) },
+        detail: { kind: 'memory-balloon', type: s.type, pid: s.pid, name: s.name ?? '',
+          baselineKB: base, currentKB: s.mem, peakKB: s.peakMem ?? 0, ratio: +ratio.toFixed(2),
+          procs: topProcs(samples, 'mem') },
       });
-      log('warn', `[L4] memory grew ${(total / this.baselineMem).toFixed(2)}x (${total}KB)`);
+      log('warn', `[L4] ${s.name || s.type} (pid ${s.pid}) memory grew ${ratio.toFixed(2)}x (${s.mem}KB)`);
     }
   }
 
@@ -73,9 +101,10 @@ export class AppMetrics implements Detector {
       this.ctx.bus.emit({
         layer: 'hardware', startIso: new Date(Date.now() - this.highCpuMs).toISOString(),
         durationMs: this.highCpuMs, severity: 'MODERATE',
-        detail: { kind: 'sustained-cpu', process: peak.type, pid: peak.pid, cpuPct: +peak.cpu.toFixed(1) },
+        detail: { kind: 'sustained-cpu', process: peak.type, name: peak.name ?? '', pid: peak.pid,
+          cpuPct: +peak.cpu.toFixed(1), wakeups: peak.wakeups ?? 0, procs: topProcs(samples, 'cpu') },
       });
-      log('warn', `[L4] sustained CPU ${peak.cpu.toFixed(1)}% on ${peak.type}`);
+      log('warn', `[L4] sustained CPU ${peak.cpu.toFixed(1)}% on ${peak.name || peak.type}`);
     }
   }
 

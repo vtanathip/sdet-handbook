@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildReport } from '../../src/report.js';
@@ -51,4 +51,63 @@ export function run(): void {
   assert.ok(html.includes('onClick'), 'html has root-cause script attribution');
   assert.ok(html.includes('Next step'), 'html has a fix suggestion');
   assert.ok(html.includes('rendering invoice #4821'), 'html shows app-domain breadcrumbs');
+
+  // Highlighting + the culprit fix: a main-loop freeze must name its HANDLER as the root cause (not a
+  // renderer offset), a high-confidence freeze must rank above demoted noise, and per-layer reports
+  // must be written.
+  const dir2 = mkdtempSync(join(tmpdir(), 'em-selfcheck2-'));
+  writeFileSync(join(dir2, 'actions.jsonl'),
+    JSON.stringify({ name: 'click Main busy', startIso: iso(100), endIso: iso(3200) }) + '\n');
+  writeFileSync(join(dir2, 'freezes.jsonl'),
+    // a real bug: main loop blocked by a named handler, corroborated, tied to a click
+    JSON.stringify({ layer: 'main-loop', startIso: iso(150), durationMs: 3000, severity: 'SEVERE', detail: { maxLagMs: 3000, blockingChannel: 'reconcile-ledger', blockingKind: 'handle', blockingMs: 2950 } }) + '\n' +
+    JSON.stringify({ layer: 'renderer-heartbeat', startIso: iso(160), durationMs: 3000, severity: 'SEVERE', detail: { gapMs: 3000, route: '/ledger' } }) + '\n' +
+    // pure noise: a lone idle console.error
+    JSON.stringify({ layer: 'js-error', startIso: iso(60_000), durationMs: 0, severity: 'MINOR', detail: { kind: 'console.error', where: 'renderer', message: 'tidy up later' } }) + '\n');
+
+  const r2 = buildReport(dir2, {
+    sessionStartIso: iso(0), sessionEndIso: iso(70_000),
+    appLabel: './demo-app', launchMode: 'source', thresholdMs: 200, loafSupported: true, mainLayers: true,
+  });
+  const md2 = readFileSync(r2.mdPath, 'utf8');
+  assert.ok(md2.includes("reconcile-ledger"), 'main-loop root cause names the blocking handler');
+  assert.ok(md2.includes('🔎 Start here'), 'report highlights the most likely bug');
+  assert.ok(md2.includes('Where to look next'), 'report tells you where to drill in');
+  assert.ok(md2.includes('Likely noise'), 'low-confidence blips are demoted, not mixed in');
+  // the idle console.error must be in the noise bucket, the real freeze in the priority list
+  assert.ok(md2.indexOf('Start here') < md2.indexOf('Likely noise'), 'noise sorted below the real bug');
+  assert.ok(existsSync(join(dir2, 'layers', 'main-loop.md')), 'per-layer detail report is written');
+
+  // Baseline: gate on REGRESSION vs a known-good run, not a static absolute. Record a green run
+  // (worst renderer-task = 2.0s), then a within-envelope run passes and a materially-worse run fails.
+  const gdir = mkdtempSync(join(tmpdir(), 'em-green-'));
+  const gmeta = { sessionStartIso: iso(0), sessionEndIso: iso(5000), appLabel: './demo-app', launchMode: 'source', thresholdMs: 200, loafSupported: true, mainLayers: true };
+  const script = (ms: number, sev: string) =>
+    JSON.stringify({ layer: 'renderer-task', startIso: iso(150), durationMs: ms, severity: sev, detail: { kind: 'loaf', scripts: [{ sourceURL: 'app.js', functionName: 'render', charPos: 1, duration: ms }] } }) + '\n';
+  writeFileSync(join(gdir, 'freezes.jsonl'), script(2000, 'MODERATE'));
+  const baselinePath = join(gdir, 'baseline.json');
+  try {
+    process.env.SAVE_BASELINE = baselinePath;
+    buildReport(gdir, gmeta);
+    delete process.env.SAVE_BASELINE;
+    assert.ok(existsSync(baselinePath), 'a green run records baseline.json');
+
+    process.env.BASELINE_FILE = baselinePath;
+
+    const wdir = mkdtempSync(join(tmpdir(), 'em-within-'));
+    writeFileSync(join(wdir, 'freezes.jsonl'), script(1900, 'MODERATE')); // ≤ 2.0s × 1.2 → within
+    const within = buildReport(wdir, gmeta);
+    assert.equal(within.incidents[0].vsBaseline, 'within', 'a 1.9s freeze is within the 2.0s baseline envelope');
+    assert.equal(within.verdict, 'PASS', 'within-baseline → PASS (no regression), even though absolute rules would CAUTION');
+
+    const bdir = mkdtempSync(join(tmpdir(), 'em-worse-'));
+    writeFileSync(join(bdir, 'freezes.jsonl'), script(5000, 'SEVERE')); // » 2.0s × 1.2 → worse
+    const worse = buildReport(bdir, gmeta);
+    assert.equal(worse.incidents[0].vsBaseline, 'worse', 'a 5s freeze is materially worse than baseline');
+    assert.equal(worse.verdict, 'FAIL', 'a regression (worse than green) + SEVERE → FAIL');
+    assert.ok(readFileSync(worse.mdPath, 'utf8').includes('Vs baseline'), 'report shows the baseline comparison');
+  } finally {
+    delete process.env.SAVE_BASELINE;
+    delete process.env.BASELINE_FILE;
+  }
 }

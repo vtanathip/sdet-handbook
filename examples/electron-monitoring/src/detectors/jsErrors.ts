@@ -31,15 +31,30 @@ export class JsErrors implements Detector {
     await page.addInitScript({ content: REJECTION_SHIM }).catch(() => {});
     await page.evaluate(REJECTION_SHIM).catch(() => {});
 
-    page.on('pageerror', (err) => this.emit('renderer', 'uncaught-exception', err.message, err.stack ?? ''));
+    page.on('pageerror', (err) => {
+      const stack = err.stack ?? '';
+      // A preload throw means the exposed contextBridge API never loaded — the whole renderer is
+      // broken in a specific, fixable way. Distinguish it from any other renderer uncaught.
+      const where = /preload/i.test(stack) ? 'preload' : 'renderer';
+      this.emit(where, 'uncaught-exception', err.message, stack);
+    });
     page.on('console', (msg) => {
-      if (msg.type() === 'error') this.emit('renderer', 'console.error', msg.text(), '');
+      if (msg.type() !== 'error') return;
+      const loc = msg.location(); // url:line:col — free, makes a console.error traceable
+      const top = loc?.url ? `${loc.url}:${(loc.lineNumber ?? 0) + 1}:${(loc.columnNumber ?? 0) + 1}` : '';
+      this.emit('renderer', 'console.error', msg.text(), '', top);
     });
 
     if (this.ctx.mainBridge) {
       await this.ctx.mainBridge.wireMainErrors();
       this.timer = setInterval(() => { void this.pollMain(); }, this.ctx.config.metricsIntervalMs);
     }
+  }
+
+  /** First V8 stack frame as `file:line:col` — the place to open. */
+  private static topFrame(stack: string): string {
+    const m = stack.match(/\n\s*at .*?\(?((?:[^\s()]+):(\d+):(\d+))\)?/);
+    return m ? m[1] : '';
   }
 
   private async pollMain(): Promise<void> {
@@ -54,14 +69,17 @@ export class JsErrors implements Detector {
     }
   }
 
-  private emit(where: string, kind: string, message: string, stack: string): void {
+  private emit(where: string, kind: string, message: string, stack: string, topFrameHint = ''): void {
     const severity = kind === 'console.error' ? 'MINOR' : 'MODERATE';
+    const topFrame = topFrameHint || JsErrors.topFrame(stack);
     void this.out.append({ ts: new Date().toISOString(), where, kind, message, stack });
     this.ctx.bus.emit({
       layer: 'js-error', startIso: new Date().toISOString(), durationMs: 0, severity,
-      detail: { kind, where, message: message.slice(0, 300) },
+      // Carry topFrame + a stack tail onto the bus so the report shows WHERE it threw, not just the
+      // message (the full stack still lives in js-errors.jsonl).
+      detail: { kind, where, message: message.slice(0, 300), topFrame, stack: stack.slice(0, 600) },
     });
-    log(severity === 'MINOR' ? 'warn' : 'error', `[JS] ${where} ${kind}: ${message.slice(0, 120)}`);
+    log(severity === 'MINOR' ? 'warn' : 'error', `[JS] ${where} ${kind}: ${message.slice(0, 120)}${topFrame ? ` @ ${topFrame}` : ''}`);
   }
 
   async stop(): Promise<void> {
