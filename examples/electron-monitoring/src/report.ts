@@ -164,7 +164,8 @@ function peakCpu(inc: Incident, metrics: MetricSample[]): { pct: number; proc: s
   for (const m of metrics) {
     const t = Date.parse(m.ts);
     if (t < lo || t > hi) continue;
-    for (const s of m.samples ?? []) if (s.cpu > pct) { pct = s.cpu; proc = s.name || s.type; }
+    // Skip our own L6 tracing instrument so peak-CPU attribution isn't "the Tracing Service".
+    for (const s of m.samples ?? []) if (s.cpu > pct && s.name !== 'Tracing Service') { pct = s.cpu; proc = s.name || s.type; }
   }
   return { pct: +pct.toFixed(1), proc };
 }

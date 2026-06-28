@@ -13,6 +13,13 @@ import { log } from '../util/logger.js';
 // ponytail: memory.workingSetSize semantics differ by OS (Windows private working set vs macOS
 // resident) so we gate on a GROWTH RATIO, never an absolute MB threshold.
 
+// Our own L6 CDP tracing spins up a "Tracing Service" utility process that grows tens of MB over a
+// run — getAppMetrics() sees it like any other process. Exclude it from FINDINGS so the instrument
+// never measures itself (it was firing false memory-balloon + peak-CPU on the Tracing Service). The
+// raw metrics.jsonl keeps it (truthful); only the detection + report attribution drop it. It only
+// exists while we trace, so a name match is safe. (ponytail: name may differ on some platforms.)
+const isInstrumentProc = (s: ProcSample): boolean => s.name === 'Tracing Service';
+
 /** Top N processes by a key (cpu or mem), compacted for a freeze-moment snapshot in the report. */
 function topProcs(samples: ProcSample[], key: 'cpu' | 'mem'): Record<string, unknown>[] {
   return [...samples]
@@ -47,9 +54,10 @@ export class AppMetrics implements Detector {
       const samples = await this.ctx.mainBridge.getAppMetrics();
       if (!Array.isArray(samples) || samples.length === 0) return; // transient empty poll — skip
       const ts = new Date().toISOString();
-      await this.out.append({ ts, samples });
-      this.checkMemory(samples, ts);
-      this.checkCpu(samples, ts);
+      await this.out.append({ ts, samples }); // raw stream keeps everything (incl. our instrument)
+      const appSamples = samples.filter((s) => !isInstrumentProc(s)); // findings exclude the instrument
+      this.checkMemory(appSamples, ts);
+      this.checkCpu(appSamples, ts);
     } catch {
       /* app closing — ignore */
     } finally {
