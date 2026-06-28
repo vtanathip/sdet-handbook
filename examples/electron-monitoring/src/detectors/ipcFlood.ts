@@ -6,12 +6,11 @@ import { log } from '../util/logger.js';
 // L7 — IPC flush / backpressure.
 // A renderer that floods the main process with `ipcRenderer.send` (or sends jumbo payloads) faster
 // than main can drain saturates the main event loop — the app freezes while the IPC queue "won't
-// flush". We count renderer→main IPC traffic in the main process (MainBridge patches ipcMain.emit)
-// and flag intervals over the storm threshold. A storm usually overlaps an L3 main-loop freeze, so
-// the report's incident ends up tagged `main-loop, ipc` — i.e. "this freeze was an IPC storm".
-//
-// Note: `ipcRenderer.invoke` is dispatched via a separate internal path and is NOT counted here; a
-// jumbo invoke still shows up via L1 (renderer serialization block) + L3 (main deserialization).
+// flush". We count renderer→main IPC traffic PER CHANNEL in the main process (MainBridge patches
+// ipcMain.emit for send/sendSync and ipcMain.handle for invoke) and flag intervals over the storm
+// threshold. The per-channel breakdown names the offending channel ("cursor-move sent 94%") so the
+// engineer goes straight to the call-site. A storm usually overlaps an L3 main-loop freeze, so the
+// report's incident ends up tagged `main-loop, ipc` — i.e. "this freeze was an IPC storm".
 
 export class IpcFlood implements Detector {
   readonly name = 'ipc';
@@ -32,20 +31,29 @@ export class IpcFlood implements Detector {
     if (!this.ctx.mainBridge || this.inflight) return;
     this.inflight = true;
     try {
-      const msgs = await this.ctx.mainBridge.readIpcDelta();
+      const counts = await this.ctx.mainBridge.readIpcCounts();
+      const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+      const msgs = ranked.reduce((a, [, n]) => a + n, 0);
       if (msgs <= 0) return;
       const ts = new Date().toISOString();
       const ratePerSec = Math.round((msgs / this.ctx.config.metricsIntervalMs) * 1000);
-      await this.out.append({ ts, msgs, ratePerSec });
+      // top 3 channels: split the `transport:channel` key back apart for the report.
+      const channels = ranked.slice(0, 3).map(([k, count]) => {
+        const i = k.indexOf(':');
+        return { transport: k.slice(0, i), channel: k.slice(i + 1), count };
+      });
+      await this.out.append({ ts, msgs, ratePerSec, channels });
       if (msgs >= this.ctx.config.ipcStormMsgs) {
+        const top = channels[0];
+        const topPct = Math.round((top.count / msgs) * 100);
         this.ctx.bus.emit({
           layer: 'ipc',
           startIso: new Date(Date.now() - this.ctx.config.metricsIntervalMs).toISOString(),
           durationMs: this.ctx.config.metricsIntervalMs,
           severity: 'MODERATE',
-          detail: { kind: 'ipc-storm', msgs, ratePerSec },
+          detail: { kind: 'ipc-storm', msgs, ratePerSec, topChannel: top.channel, topTransport: top.transport, topPct, channels },
         });
-        log('warn', `[L7] IPC storm: ${msgs} msgs in ${this.ctx.config.metricsIntervalMs}ms (~${ratePerSec}/s)`);
+        log('warn', `[L7] IPC storm: ${msgs} msgs (~${ratePerSec}/s) — top '${top.transport}:${top.channel}' ${topPct}%`);
       }
     } catch {
       /* app closing — ignore */

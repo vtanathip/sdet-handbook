@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { severityFor, type FreezeEvent, type FreezeLayer, type Severity } from './freezeBus.js';
 import type { ActionWindow } from './currentAction.js';
@@ -8,13 +8,15 @@ import { correlate } from './correlator.js';
 // freeze "incidents", attributes each to a UI action, computes the verdict + exit code
 // (mirrors process-watchdog/ReportWriter.cs) and writes the Markdown sign-off + HTML report.
 
-interface MetricSample { ts: string; samples: { pid: number; type: string; cpu: number; mem: number }[] }
+interface MetricSample { ts: string; samples: { pid: number; type: string; cpu: number; mem: number; name?: string; peakMem?: number; wakeups?: number }[] }
 interface Breadcrumb { ts: string; where: string; level: string; text: string }
 
 export interface Incident {
   startIso: string; endIso: string; durationMs: number;
   layers: FreezeLayer[]; severity: Severity; peakCpuPct: number; peakCpuProc: string;
   action: string; events: FreezeEvent[]; breadcrumbs?: Breadcrumb[];
+  // Ranking (filled in buildReport): how confident we are this is a real bug, and whether it's noise.
+  confidence?: number; confidenceReasons?: string[]; noise?: boolean;
 }
 
 export interface ReportMeta {
@@ -162,7 +164,7 @@ function peakCpu(inc: Incident, metrics: MetricSample[]): { pct: number; proc: s
   for (const m of metrics) {
     const t = Date.parse(m.ts);
     if (t < lo || t > hi) continue;
-    for (const s of m.samples ?? []) if (s.cpu > pct) { pct = s.cpu; proc = s.type; }
+    for (const s of m.samples ?? []) if (s.cpu > pct) { pct = s.cpu; proc = s.name || s.type; }
   }
   return { pct: +pct.toFixed(1), proc };
 }
@@ -200,63 +202,216 @@ function stamp(iso: string): string {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-interface Script { sourceURL: string; functionName: string; charPos: number; duration: number }
-function topScript(inc: Incident): Script | undefined {
+interface Script {
+  sourceURL: string; functionName: string; charPos: number; duration: number;
+  invoker?: string; invokerType?: string; forcedLayoutMs?: number; pauseMs?: number;
+}
+function allScripts(inc: Incident): Script[] {
   const all: Script[] = [];
   for (const e of inc.events) {
     const s = (e.detail as { scripts?: Script[] }).scripts;
     if (Array.isArray(s)) all.push(...s);
   }
-  return all.sort((a, b) => b.duration - a.duration)[0];
+  return all.sort((a, b) => b.duration - a.duration);
+}
+function topScript(inc: Incident): Script | undefined {
+  return allScripts(inc)[0];
+}
+// Invoker-first label for a script: the real call site ('BUTTON#save.onclick'), falling back to the
+// function name, and only to a raw char offset when both are empty (inline/bundled with no names).
+function scriptLabel(s: Script): string {
+  const who = s.invoker || s.functionName || (s.sourceURL ? '(anonymous)' : '(inline script)');
+  const where = s.invokerType ? ` (${s.invokerType})` : s.invoker || s.functionName ? '' : ` (offset ${s.charPos})`;
+  const url = s.sourceURL && !s.invoker ? `${s.sourceURL} → ` : '';
+  return `${url}${who}${where}`;
 }
 
-// One human-readable "where" line for a single detector event.
+// Frame-phase split + thrash/pause hints for a renderer-task event, when LoAF supplied them.
+function taskPhase(d: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const w = Number(d.workMs ?? 0), s = Number(d.styleLayoutMs ?? 0);
+  if (w > 0 || s > 0) {
+    if (w > 0) parts.push(`${fmtS1(w)} in script`);
+    if (s > 0) parts.push(`${fmtS1(s)} in style/layout`);
+  }
+  return parts.length ? `: ${parts.join(', ')}` : '';
+}
+function scriptHint(s: Script): string {
+  const hints: string[] = [];
+  if (s.forcedLayoutMs && s.forcedLayoutMs > s.duration * 0.3) hints.push(`incl. ${Math.round(s.forcedLayoutMs)}ms forced reflow — layout thrashing`);
+  if (s.pauseMs && s.pauseMs > s.duration * 0.3) hints.push(`${Math.round(s.pauseMs)}ms paused on a synchronous call (sync XHR / sendSync / alert)`);
+  return hints.length ? ` [${hints.join('; ')}]` : '';
+}
+
+// One human-readable "where" line for a single detector event — carries the new diagnostic detail.
 function evidenceLine(e: FreezeEvent): string {
   const d = e.detail as Record<string, unknown>;
   switch (e.layer) {
     case 'renderer-task': {
-      const scripts = Array.isArray(d.scripts) ? (d.scripts as Script[]) : [];
+      const scripts = Array.isArray(d.scripts) ? (d.scripts as Script[]).slice().sort((a, b) => b.duration - a.duration) : [];
       if (scripts.length) {
-        const s = [...scripts].sort((a, b) => b.duration - a.duration)[0];
-        return `blocked ${e.durationMs}ms — ${s.sourceURL || '(inline script)'} → ${s.functionName || '(anonymous)'} (offset ${s.charPos}, ${Math.round(s.duration)}ms)`;
+        const top = scripts.slice(0, 3).map((s) => `${scriptLabel(s)} ${fmtS1(s.duration)}${scriptHint(s)}`).join('; ');
+        return `blocked ${fmtS1(e.durationMs)}${taskPhase(d)} — ${top}`;
       }
-      return `blocked ${e.durationMs}ms (${String(d.kind ?? 'long task')})`;
+      return `blocked ${e.durationMs}ms${taskPhase(d)} (${String(d.kind ?? 'long task')})`;
     }
-    case 'renderer-heartbeat': return `UI thread unresponsive for ${e.durationMs}ms`;
-    case 'main-loop': return `main event loop stalled ${String(d.maxLagMs ?? e.durationMs)}ms`;
-    case 'hardware':
-      if (d.kind === 'memory-balloon') return `memory grew ${String(d.ratio)}× (now ${fmtMB(Number(d.currentKB))})`;
-      if (d.kind === 'sustained-cpu') return `CPU ${String(d.cpuPct)}% sustained on the ${String(d.process)} process`;
+    case 'renderer-heartbeat': {
+      const route = d.route ? ` on ${String(d.route) || '/'}` : '';
+      const hidden = d.visibility === 'hidden' ? ' [window hidden]' : '';
+      const cores = d.cores ? ` (${String(d.cores)} cores)` : '';
+      return `UI thread unresponsive for ${e.durationMs}ms${route}${cores}${hidden}`;
+    }
+    case 'main-loop':
+      if (d.blockingChannel) return `main loop blocked ${String(d.maxLagMs ?? e.durationMs)}ms — handler '${String(d.blockingChannel)}' (${d.blockingKind === 'on' ? 'sync send' : 'invoke'}) ran ${String(d.blockingMs)}ms`;
+      return `main event loop stalled ${String(d.maxLagMs ?? e.durationMs)}ms (no IPC handler matched — suspect compute/GC/sync I/O)`;
+    case 'hardware': {
+      if (d.kind === 'memory-balloon') {
+        const who = (d.name ? `${String(d.name)} ` : '') + `${String(d.type ?? 'process')} (pid ${String(d.pid)})`;
+        return `memory grew ${String(d.ratio)}× in the ${who} — ${fmtMB(Number(d.baselineKB))} → ${fmtMB(Number(d.currentKB))}`;
+      }
+      if (d.kind === 'sustained-cpu') {
+        const who = (d.name ? `${String(d.name)} ` : '') + `${String(d.process)} process (pid ${String(d.pid)})`;
+        const wake = Number(d.wakeups) > 0 && Number(d.cpuPct) < 50 ? ` — high idle wakeups (${String(d.wakeups)}/s): busy-poll/timer storm` : '';
+        return `CPU ${String(d.cpuPct)}% sustained on the ${who}${wake}`;
+      }
       return 'resource pressure';
+    }
     case 'native': {
       if (d.kind === 'main-process-gone') return `MAIN process exited unexpectedly (code ${String(d.code)}${d.signal ? `, ${String(d.signal)}` : ''}) — the whole app went down`;
-      const det = d.details as { reason?: string; exitCode?: number } | undefined;
-      const reason = det?.reason ? ` — reason: ${det.reason}${det.exitCode != null ? ` (exit ${det.exitCode})` : ''}` : '';
-      return `${String(d.kind)}${reason}`;
+      const win = d.title || d.url ? `${d.title ? `"${String(d.title)}"` : ''}${d.url ? ` (${String(d.url)})` : ''}` : '';
+      if (d.kind === 'unresponsive-bracket') return `${String(d.wcType || 'window')} ${win} became unresponsive for ${e.durationMs}ms`;
+      const det = d.details as { reason?: string; exitCode?: number; type?: string; name?: string; serviceName?: string } | undefined;
+      const reason = det?.reason ? `${det.reason}${det.exitCode != null ? ` (exit ${det.exitCode})` : ''}` : 'gone';
+      if (d.kind === 'render-process-gone') return `renderer for ${String(d.wcType || 'window')} ${win} ${reason}`;
+      if (d.kind === 'child-process-gone') {
+        const name = det?.name || det?.serviceName;
+        return `${det?.type ?? 'child'} process${name ? ` ${name}` : ''} ${reason}`;
+      }
+      return `${String(d.kind)} — ${reason}`;
     }
-    case 'ipc': return `${String(d.msgs)} IPC messages in one interval (~${String(d.ratePerSec)}/s)`;
-    case 'js-error': return `${String(d.kind)}${d.where ? ` [${String(d.where)}]` : ''}: ${String(d.message ?? '')}`;
-    case 'stall': return `${String(d.kind ?? 'operation')} stuck ${Math.round(Number(d.ageMs ?? e.durationMs) / 1000)}s${d.target ? ` — ${String(d.target)}` : ''}`;
+    case 'ipc':
+      if (d.topChannel) return `channel '${String(d.topChannel)}' (${String(d.topTransport ?? 'send')}) sent ${Number(d.msgs).toLocaleString()} msgs in one interval — ${String(d.topPct)}% of traffic (~${String(d.ratePerSec)}/s)`;
+      return `${String(d.msgs)} IPC messages in one interval (~${String(d.ratePerSec)}/s)`;
+    case 'js-error': {
+      const at = d.topFrame ? ` — at ${String(d.topFrame)}` : '';
+      return `${String(d.kind)}${d.where ? ` [${String(d.where)}]` : ''}: ${String(d.message ?? '')}${at}`;
+    }
+    case 'stall': {
+      const shape = `${String(d.resourceType ?? 'request')}${d.method ? ` ${String(d.method)}` : ''}`;
+      const fail = d.errorText ? ` — FAILED ${String(d.errorText)}${d.blockedReason ? ` / ${String(d.blockedReason)}` : ''}` : '';
+      const by = d.initiator ? ` (started by ${String(d.initiator)})` : '';
+      return `${shape} stuck ${Math.round(Number(d.ageMs ?? e.durationMs) / 1000)}s — ${String(d.target ?? '')}${fail}${by}`;
+    }
     case 'storage':
-      if (d.kind === 'storage-pressure') return `storage at ${String(d.pct)}% of quota (${fmtMB(Number(d.usageKB))} / ${fmtMB(Number(d.quotaKB))})`;
-      if (d.kind === 'disk-low') return `disk low: ${fmtMB(Number(d.freeKB))} free on the userData volume`;
-      if (d.kind === 'slow-disk') return `slow disk: ${String(d.ms)}ms for a tiny write to userData`;
+      if (d.kind === 'storage-pressure') return `storage at ${String(d.pct)}% of quota (${fmtMB(Number(d.usageKB))} / ${fmtMB(Number(d.quotaKB))})${d.biggest ? ` — biggest: ${String(d.biggest)}` : ''}${d.origin ? ` (${String(d.origin)})` : ''}`;
+      if (d.kind === 'disk-low') return `disk low: ${fmtMB(Number(d.freeKB))} free${d.path ? ` on ${String(d.path)}` : ' on the userData volume'}`;
+      if (d.kind === 'slow-disk') return `slow disk: ${String(d.ms)}ms for a tiny write${d.path ? ` to ${String(d.path)}` : ' to userData'}`;
       return 'storage/disk pressure';
-    case 'subprocess':
-      if (d.kind === 'subprocess-hung') return `child still running after ${Math.round(Number(d.ageMs) / 1000)}s: ${String(d.cmd)} (pid ${String(d.pid)})`;
-      if (d.kind === 'subprocess-crashed') return `child exited abnormally: ${String(d.cmd)} (code ${String(d.code)}${d.signal ? `, ${String(d.signal)}` : ''})`;
+    case 'subprocess': {
+      const what = String(d.argv || d.cmd);
+      if (d.kind === 'subprocess-hung') return `child still running after ${Math.round(Number(d.ageMs) / 1000)}s: ${what} (pid ${String(d.pid)})`;
+      if (d.kind === 'subprocess-spawn-error') return `spawn failed: ${String(d.message)} — ${what}`;
+      if (d.kind === 'subprocess-crashed') {
+        const err = d.stderrTail ? ` — stderr: ${String(d.stderrTail).trim().split('\n').slice(-1)[0]}` : '';
+        return `child exited abnormally: ${what} (code ${String(d.code)}${d.signal ? `, ${String(d.signal)}` : ''})${err}`;
+      }
       return 'subprocess problem';
+    }
     default: return `${e.durationMs}ms`;
   }
 }
 
-// The single most useful "root cause" pointer for an incident.
+// The single most useful "root cause" pointer for an incident. Sourced from the PRIMARY layer:
+// only a renderer layer lets the LoAF script own the root cause — otherwise a main-process freeze
+// wrongly showed a renderer char offset (the old bug).
 function culprit(inc: Incident): string {
-  const s = topScript(inc);
-  if (s) return `${s.sourceURL || '(inline script)'} → ${s.functionName || '(anonymous)'} (offset ${s.charPos})`;
   const p = primaryLayer(inc);
+  if (p === 'renderer-task' || p === 'renderer-heartbeat') {
+    const s = topScript(inc);
+    if (s) return scriptLabel(s);
+  }
   const ev = inc.events.find((e) => e.layer === p) ?? inc.events[0];
   return ev ? evidenceLine(ev) : '—';
+}
+
+// Does this incident have a concrete, named root cause (vs a generic "stalled"/"resource pressure")?
+function hasNamedCause(inc: Incident): boolean {
+  const p = primaryLayer(inc);
+  if (p === 'renderer-task') return !!topScript(inc);
+  const d = (inc.events.find((e) => e.layer === p)?.detail ?? {}) as Record<string, unknown>;
+  if (p === 'main-loop') return !!d.blockingChannel;
+  if (p === 'ipc') return !!d.topChannel;
+  if (p === 'hardware') return !!d.pid;
+  if (p === 'native') return !!(d.title || d.url || (d.details as { type?: string })?.type);
+  if (p === 'renderer-heartbeat') return !!d.route;
+  return false;
+}
+
+// ── Confidence × impact ranking: which incident is most likely a real bug, and how to highlight it ─
+// Confidence comes from corroboration (independent layers agreeing), being tied to a user action,
+// and having a named cause. Impact comes from severity. A low-confidence, low-impact, idle blip is
+// demoted as likely noise so the real bug isn't buried.
+const FREEZE_LAYER_SET = FREEZE_GROUP;
+function confidenceOf(inc: Incident): { score: number; reasons: string[] } {
+  const layers = new Set(inc.layers.filter((l) => FREEZE_LAYER_SET.has(l))).size;
+  const tied = !!inc.action && inc.action !== '(idle / between steps)';
+  const named = hasNamedCause(inc);
+  let score = 0;
+  const reasons: string[] = [];
+  if (layers >= 3) { score += 2; reasons.push(`${layers} layers agree`); }
+  else if (layers === 2) { score += 1; reasons.push('2 layers agree'); }
+  else if (layers === 1) reasons.push('1 layer only');
+  if (tied) { score += 1; reasons.push(`tied to ${inc.action}`); }
+  else reasons.push('not tied to an action');
+  if (named) { score += 1; reasons.push('named cause'); }
+  return { score, reasons };
+}
+function impactRank(inc: Incident): number {
+  return SEV_RANK[inc.severity] * 100 + Math.min(99, Math.round(inc.durationMs / 100));
+}
+const confLabel = (inc: Incident): string => ((inc.confidence ?? 0) >= 3 ? 'high' : (inc.confidence ?? 0) === 2 ? 'medium' : 'low');
+// Signal incidents, worst-first; and the demoted-noise bucket.
+function rankIncidents(incidents: Incident[]): { signal: Incident[]; noise: Incident[] } {
+  const signal = incidents.filter((i) => !i.noise).sort((a, b) => impactRank(b) - impactRank(a) || (b.confidence ?? 0) - (a.confidence ?? 0));
+  return { signal, noise: incidents.filter((i) => i.noise) };
+}
+// Likely noise: MINOR, single-layer, untied, unnamed — present for completeness but out of the way.
+function isLikelyNoise(inc: Incident): boolean {
+  return inc.severity === 'MINOR' && confidenceOf(inc).score === 0 && !hasNamedCause(inc);
+}
+// "Where to look next" — names the exact artifact + filter to drill into for this incident.
+function whereToLookNext(inc: Incident): string {
+  const p = primaryLayer(inc);
+  const at = hhmmss(inc.startIso);
+  switch (p) {
+    case 'renderer-task':
+    case 'renderer-heartbeat':
+      return `renderer-tasks.jsonl around ${at}; trace.json at ${at} → DevTools Performance (renderer main thread)`;
+    case 'main-loop': {
+      const d = inc.events.find((e) => e.layer === 'main-loop')?.detail as Record<string, unknown> | undefined;
+      return d?.blockingChannel
+        ? `open the ipcMain.${d.blockingKind === 'on' ? 'on' : 'handle'}('${String(d.blockingChannel)}') handler. NB: the main process is NOT in trace.json (Chromium-only) — attach --inspect to profile it`
+        : `main process — attach --inspect and profile; not visible in trace.json`;
+    }
+    case 'ipc':
+      return `ipc.jsonl around ${at} for the per-channel breakdown`;
+    case 'hardware': {
+      const d = inc.events.find((e) => e.layer === 'hardware')?.detail as Record<string, unknown> | undefined;
+      return `metrics.jsonl around ${at}${d?.pid ? `, pid ${String(d.pid)}` : ''}; attach a heap profiler to that process`;
+    }
+    case 'native':
+      return `the named window/process above; check the crash reason; correlate with the freeze just before`;
+    case 'js-error':
+      return `js-errors.jsonl for the full stack`;
+    case 'stall':
+      return `add a timeout/AbortController at the initiator above`;
+    case 'subprocess':
+      return `subprocess.jsonl for this pid; read the stderr above`;
+    case 'storage':
+      return `storage.jsonl around ${at}`;
+    default:
+      return `freezes.jsonl around ${at}`;
+  }
 }
 
 // Report CPU factually — DON'T infer deadlock-vs-compute from it. getAppMetrics percentCPUUsage is
@@ -269,6 +424,41 @@ function cpuNote(inc: Incident, mainLayers: boolean): string {
     ? `peak ${inc.peakCpuPct}% on the ${proc} process`
     : 'near 0% (a blocked process often can’t be sampled mid-freeze — treat as approximate)';
   return `${base} — getAppMetrics CPU% is coarse; use trace.json for the real hot path`;
+}
+
+// Each layer's raw evidence stream, for the "drill in here" pointer on its per-layer report.
+const LAYER_JSONL: Partial<Record<FreezeLayer, string>> = {
+  'renderer-task': 'renderer-tasks.jsonl', hardware: 'metrics.jsonl', ipc: 'ipc.jsonl',
+  'js-error': 'js-errors.jsonl', storage: 'storage.jsonl', subprocess: 'subprocess.jsonl',
+};
+
+// One focused report per layer that fired: every event of that layer with full detail + a pointer to
+// the raw stream. The main report stays an executive index; these are the deep-dives you asked for.
+function renderLayerReports(runDir: string, events: FreezeEvent[]): FreezeLayer[] {
+  const byLayer = new Map<FreezeLayer, FreezeEvent[]>();
+  for (const e of events) (byLayer.get(e.layer) ?? byLayer.set(e.layer, []).get(e.layer)!).push(e);
+  byLayer.delete('deep');
+  if (byLayer.size === 0) return [];
+  mkdirSync(join(runDir, 'layers'), { recursive: true });
+  const written: FreezeLayer[] = [];
+  for (const [layer, evs] of byLayer) {
+    const info = LAYER_INFO[layer];
+    const L: string[] = [];
+    L.push(`# ${info.label} — layer detail`, '');
+    L.push(`**What this detects:** ${info.what}`, '');
+    L.push(`**General fix:** ${info.fix}`, '');
+    const jsonl = LAYER_JSONL[layer];
+    if (jsonl) L.push(`**Raw evidence:** \`${jsonl}\` (full, unfiltered stream)`, '');
+    L.push('', `## Events (${evs.length})`, '');
+    L.push('| When | Duration | Severity | Triggered by | Detail |', '|------|----------|----------|--------------|--------|');
+    for (const e of [...evs].sort((a, b) => Date.parse(a.startIso) - Date.parse(b.startIso))) {
+      L.push(`| ${hhmmss(e.startIso)} | ${fmtS1(e.durationMs)} | ${e.severity} | ${e.action ?? '—'} | ${evidenceLine(e).replace(/\|/g, '\\|').replace(/\n/g, ' ')} |`);
+    }
+    L.push('');
+    writeFileSync(join(runDir, 'layers', `${layer}.md`), L.join('\n'));
+    written.push(layer);
+  }
+  return written;
 }
 
 /** Read a run's evidence and write report.md + report.html. Returns verdict + exit code for CI. */
@@ -289,6 +479,8 @@ export function buildReport(runDir: string, meta: ReportMeta): ReportResult {
     const lookback = Math.min(30_000, Math.max(0, start - prevEnd));
     inc.breadcrumbs = breadcrumbsFor(start, Date.parse(inc.endIso), breadcrumbs, 6, lookback);
     prevEnd = Math.max(prevEnd, Date.parse(inc.endIso));
+    const c = confidenceOf(inc);
+    inc.confidence = c.score; inc.confidenceReasons = c.reasons; inc.noise = isLikelyNoise(inc);
   }
 
   const { verdict, exitCode } = verdictOf(incidents);
@@ -300,8 +492,9 @@ export function buildReport(runDir: string, meta: ReportMeta): ReportResult {
     video: existsSync(join(runDir, 'video.webm')),
     trace: existsSync(join(runDir, 'trace.json')),
   };
-  const md = renderMarkdown({ meta, incidents, verdict, longest, total, avg, rawFreezes, artifacts });
-  const html = renderHtml({ meta, incidents, verdict, longest, total, artifacts });
+  const layerFiles = renderLayerReports(runDir, correlated);
+  const md = renderMarkdown({ meta, incidents, verdict, longest, total, avg, rawFreezes, artifacts, layerFiles });
+  const html = renderHtml({ meta, incidents, verdict, longest, total, artifacts, layerFiles });
 
   const base = `electron-freeze-report-${stamp(meta.sessionStartIso)}`;
   const mdPath = join(runDir, `${base}.md`);
@@ -314,7 +507,7 @@ export function buildReport(runDir: string, meta: ReportMeta): ReportResult {
 function renderMarkdown(a: {
   meta: ReportMeta; incidents: Incident[]; verdict: ReportResult['verdict'];
   longest: number; total: number; avg: number; rawFreezes: FreezeEvent[];
-  artifacts: { video: boolean; trace: boolean };
+  artifacts: { video: boolean; trace: boolean }; layerFiles: FreezeLayer[];
 }): string {
   const { meta, incidents, verdict } = a;
   const start = new Date(meta.sessionStartIso), end = new Date(meta.sessionEndIso);
@@ -329,26 +522,41 @@ function renderMarkdown(a: {
   L.push(`| Freeze Threshold | ${meta.thresholdMs}ms |`);
   L.push(`| **Verdict** | **${VERDICT_EMOJI[verdict]} ${verdict}** |`, '');
 
+  const { signal, noise } = rankIncidents(incidents);
   if (incidents.length === 0) {
     L.push('## Result', '', 'No freezes detected during the session. 🎉', '');
   } else {
-    L.push('## Freezes at a glance', '');
-    L.push('| # | When | Triggered by | What froze | Duration | Severity |');
-    L.push('|---|------|--------------|-----------|----------|----------|');
-    incidents.forEach((i, n) => {
-      L.push(`| ${n + 1} | ${hhmmss(i.startIso)} | ${i.action} | ${LAYER_INFO[primaryLayer(i)].label} | ${fmtS1(i.durationMs)} | ${i.severity} |`);
-    });
-    L.push('');
+    // Start here: the single highest impact × confidence incident — the one most likely a real bug.
+    const top = signal[0];
+    if (top) {
+      L.push('## 🔎 Start here', '');
+      L.push(`The most likely bug: **${LAYER_INFO[primaryLayer(top)].label}** during **${top.action}** — ${fmtS1(top.durationMs)}, ${top.severity}.`, '');
+      L.push(`- **Root cause:** ${culprit(top)}`);
+      L.push(`- **Why this one (confidence ${confLabel(top)}):** ${top.confidenceReasons?.join(' · ')}`);
+      L.push(`- **Look next:** ${whereToLookNext(top)}`, '');
+    }
+
+    if (signal.length) {
+      L.push('## Freezes by priority', '');
+      L.push('| Rank | When | Triggered by | What froze | Duration | Severity | Confidence |');
+      L.push('|---|------|--------------|-----------|----------|----------|------------|');
+      signal.forEach((i, n) => {
+        L.push(`| ${n + 1} | ${hhmmss(i.startIso)} | ${i.action} | ${LAYER_INFO[primaryLayer(i)].label} | ${fmtS1(i.durationMs)} | ${i.severity} | ${confLabel(i)} |`);
+      });
+      L.push('');
+    }
 
     L.push('## Diagnosis', '');
-    incidents.forEach((i, n) => {
+    signal.forEach((i, n) => {
       const p = primaryLayer(i);
       L.push(`### #${n + 1} · ${LAYER_INFO[p].label} · ${fmtS1(i.durationMs)} (${i.severity})`, '');
+      L.push(`- **Confidence:** ${confLabel(i)} — ${i.confidenceReasons?.join(' · ')}`);
       L.push(`- **Triggered by:** ${i.action}`);
       L.push(`- **Where (root cause):** ${culprit(i)}`);
       L.push(`- **What happened:** ${LAYER_INFO[p].what}`);
       L.push(`- **CPU:** ${cpuNote(i, meta.mainLayers)}`);
       L.push(`- **Next step:** ${LAYER_INFO[p].fix}`);
+      L.push(`- **Where to look next:** ${whereToLookNext(i)}`);
       const others = i.events.map((e) => `${LAYER_INFO[e.layer].label}: ${evidenceLine(e)}`);
       L.push(`- **Signals:** ${[...new Set(others)].join('; ')}`);
       if (i.breadcrumbs?.length) {
@@ -357,6 +565,13 @@ function renderMarkdown(a: {
       }
       L.push('');
     });
+
+    if (noise.length) {
+      L.push(`## Likely noise (${noise.length})`, '');
+      L.push('Low-confidence: single-layer, not tied to an action, sub-second. Shown for completeness — check these last.', '');
+      for (const i of noise) L.push(`- \`${hhmmss(i.startIso)}\` ${LAYER_INFO[primaryLayer(i)].label} · ${fmtS1(i.durationMs)} · ${i.action}`);
+      L.push('');
+    }
 
     L.push('## Summary', '');
     L.push(`- **Freezes:** ${incidents.length} · **worst:** ${fmtS1(a.longest)} · **total frozen:** ${fmtS1(a.total)} · **average:** ${fmtS1(a.avg)}`);
@@ -370,6 +585,13 @@ function renderMarkdown(a: {
   L.push(`| Longest freeze < 3s | < 3s | ${check(a.longest < 3000)} ${fmtSec(a.longest)} |`);
   L.push(`| Total freeze time < 10s | < 10s | ${check(a.total < 10000)} ${fmtSec(a.total)} |`, '');
 
+  if (a.layerFiles.length) {
+    L.push('## Per-layer detail', '');
+    L.push('Each layer that fired has its own report with every event and a pointer to its raw stream:', '');
+    for (const l of a.layerFiles) L.push(`- [${LAYER_INFO[l].label}](layers/${l}.md)`);
+    L.push('');
+  }
+
   L.push('## Artifacts', '');
   L.push('- `report.html` — visual report (open in a browser)');
   if (a.artifacts.video) L.push('- `video.webm` — screen recording of the run');
@@ -381,11 +603,20 @@ function renderMarkdown(a: {
 
 function renderHtml(a: {
   meta: ReportMeta; incidents: Incident[]; verdict: ReportResult['verdict'];
-  longest: number; total: number; artifacts: { video: boolean; trace: boolean };
+  longest: number; total: number; artifacts: { video: boolean; trace: boolean }; layerFiles: FreezeLayer[];
 }): string {
   const { meta, incidents, verdict } = a;
   const sevClass = (s: Severity) => `sev-${s.toLowerCase()}`;
   const barMax = Math.max(a.longest, 1);
+  const { signal } = rankIncidents(incidents);
+  const top = signal[0];
+  const startHere = top ? `
+  <a class="starthere" href="#inc${incidents.indexOf(top)}">
+    <span class="sh-tag">🔎 Start here</span>
+    <span class="sh-body"><b>${esc(LAYER_INFO[primaryLayer(top)].label)}</b> during <b>${esc(top.action)}</b> — ${fmtS1(top.durationMs)}, ${top.severity}.
+    <span class="sh-cause">${esc(culprit(top))}</span>
+    <span class="sh-why">confidence ${confLabel(top)}: ${esc(top.confidenceReasons?.join(' · ') ?? '')}</span></span>
+  </a>` : '';
 
   const timelineRows = incidents.map((i, n) => {
     const w = Math.max(6, Math.round((i.durationMs / barMax) * 100));
@@ -409,13 +640,15 @@ function renderHtml(a: {
     const deep = a.artifacts.trace
       ? `<div class="kv"><span>Dig deeper</span><div><code>trace.json</code> at <b>${hhmmss(i.startIso)}</b> → open in chrome://tracing / DevTools Performance for the exact call stack</div></div>`
       : '';
-    return `<section id="inc${n}" class="card ${sevClass(i.severity)}">
-      <h3><span class="num">#${n + 1}</span> ${esc(LAYER_INFO[p].label)} · ${fmtS1(i.durationMs)} <span class="badge ${sevClass(i.severity)}">${i.severity}</span></h3>
+    const conf = `${confLabel(i)} · ${esc(i.confidenceReasons?.join(' · ') ?? '')}`;
+    return `<section id="inc${n}" class="card ${sevClass(i.severity)}${i.noise ? ' noise' : ''}">
+      <h3><span class="num">#${n + 1}</span> ${esc(LAYER_INFO[p].label)} · ${fmtS1(i.durationMs)} <span class="badge ${sevClass(i.severity)}">${i.severity}</span><span class="conf conf-${confLabel(i)}">${conf}</span></h3>
       <div class="kv"><span>Triggered by</span><div><b>${esc(i.action)}</b> at ${hhmmss(i.startIso)}</div></div>
       <div class="kv"><span>Root cause</span><div class="cause">${esc(culprit(i))}</div></div>
       <div class="kv"><span>What happened</span><div>${esc(LAYER_INFO[p].what)}</div></div>
       <div class="kv"><span>CPU</span><div>${esc(cpuNote(i, meta.mainLayers))}</div></div>
       <div class="kv"><span>Next step</span><div class="fix">${esc(LAYER_INFO[p].fix)}</div></div>
+      <div class="kv"><span>Look next</span><div class="look">${esc(whereToLookNext(i))}</div></div>
       <div class="kv"><span>Signals</span><div>${chips}<ul class="sig">${signals}</ul></div></div>
       ${crumbs}
       ${deep}
@@ -464,7 +697,18 @@ function renderHtml(a: {
   .kv{display:grid;grid-template-columns:120px 1fr;gap:10px;padding:5px 0;font-size:.92rem}
   .kv>span{color:var(--muted);font-weight:600}
   .cause{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#f3f4f6;border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:.85rem;word-break:break-all}
-  .fix{color:#1e40af}
+  .fix{color:#1e40af}.look{color:#3730a3;font-size:.88rem}
+  /* start-here callout */
+  .starthere{display:flex;gap:14px;align-items:flex-start;background:#fffbeb;border:1px solid #fde68a;border-left:5px solid var(--mod);border-radius:12px;padding:14px 16px;margin:0 0 18px;text-decoration:none;color:inherit}
+  .starthere:hover{background:#fef9e7}
+  .sh-tag{flex:none;font-weight:800;color:var(--mod);white-space:nowrap}
+  .sh-body{font-size:.95rem}.sh-cause{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.82rem;margin-top:4px;word-break:break-all}
+  .sh-why{display:block;color:var(--muted);font-size:.8rem;margin-top:2px}
+  /* confidence chip */
+  .conf{margin-left:auto;font-size:.7rem;font-weight:600;color:var(--muted)}
+  .conf-high{color:var(--sev)}.conf-medium{color:var(--mod)}.conf-low{color:var(--muted)}
+  .card.noise{opacity:.6}
+  .perlayer{font-size:.9rem}.perlayer a{color:var(--accent);text-decoration:none;margin-right:10px}
   .chip{display:inline-block;background:#eef2ff;color:#3730a3;border:1px solid #e0e7ff;border-radius:999px;padding:1px 9px;font-size:.74rem;margin:0 4px 4px 0}
   ul.sig{margin:6px 0 0;padding-left:18px;font-size:.85rem;color:#374151}
   ul.sig code{font-size:.8rem}
@@ -489,10 +733,12 @@ function renderHtml(a: {
     <span><b>Threshold:</b> ${meta.thresholdMs}ms</span>
   </div>
   ${incidents.length === 0 ? '<div class="empty">🎉 Nothing froze. Nice.</div>' : `
+  ${startHere}
   <h2>Timeline — which action froze, and for how long</h2>
   <div class="timeline">${timelineRows}</div>
   <h2>What froze &amp; how to fix it</h2>
   ${cards}`}
+  ${a.layerFiles.length ? `<h2>Per-layer detail</h2><p class="perlayer">${a.layerFiles.map((l) => `<a href="layers/${l}.md">${esc(LAYER_INFO[l].label)}</a>`).join('')}</p>` : ''}
   <h2>Artifacts</h2>
   <p class="arts">${artLinks}</p>
 </div></body></html>`;

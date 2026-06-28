@@ -24,6 +24,7 @@ function installHeartbeat(): void {
   const w = window as unknown as { __hbInstalled?: boolean; __hbRead?: () => unknown };
   if (w.__hbInstalled) return;
   w.__hbInstalled = true;
+  const cores = navigator.hardwareConcurrency; // constant — capacity reframes severity (2-core CI box)
   let last = performance.now();
   let maxGap = 0;
   const tick = () => {
@@ -39,10 +40,19 @@ function installHeartbeat(): void {
   setInterval(tick, 50);
   const raf = () => { tick(); requestAnimationFrame(raf); };
   requestAnimationFrame(raf);
+  // Read the cheap contextual envelope at recovery: WHICH screen froze + was it visible + capacity.
+  // All free reads — no new observers/wrappers. (ponytail: skipped an in-flight request counter; add
+  // a PerformanceObserver('resource') count when network-vs-CPU disambiguation is worth one.)
   w.__hbRead = () => {
     const m = maxGap;
     maxGap = 0;
-    return { maxGap: m, sinceLast: performance.now() - last };
+    return {
+      maxGap: m,
+      sinceLast: performance.now() - last,
+      route: location.pathname + location.search + location.hash,
+      visibility: document.visibilityState,
+      cores,
+    };
   };
 }
 
@@ -63,9 +73,9 @@ export class RendererHeartbeat implements Detector {
     this.inflight = true;
     try {
       const r = (await this.ctx.page.evaluate(
-        () => (window as unknown as { __hbRead?: () => { maxGap: number } }).__hbRead?.() ?? { maxGap: 0 },
-      )) as { maxGap: number };
-      emitIfFrozen(r.maxGap, this.ctx);
+        () => (window as unknown as { __hbRead?: () => HbSnapshot }).__hbRead?.() ?? { maxGap: 0 },
+      )) as HbSnapshot;
+      emitIfFrozen(r, this.ctx);
     } catch {
       /* page closed / navigating — ignore */
     } finally {
@@ -79,15 +89,17 @@ export class RendererHeartbeat implements Detector {
   }
 }
 
-function emitIfFrozen(maxGap: number, ctx: DetectorCtx): void {
-  if (maxGap <= ctx.config.heartbeatMs) return;
-  const durationMs = Math.round(maxGap);
+interface HbSnapshot { maxGap: number; sinceLast?: number; route?: string; visibility?: string; cores?: number }
+
+function emitIfFrozen(snap: HbSnapshot, ctx: DetectorCtx): void {
+  if (snap.maxGap <= ctx.config.heartbeatMs) return;
+  const durationMs = Math.round(snap.maxGap);
   ctx.bus.emit({
     layer: 'renderer-heartbeat',
     startIso: new Date(Date.now() - durationMs).toISOString(),
     durationMs,
     severity: severityFor(durationMs),
-    detail: { gapMs: durationMs, thresholdMs: ctx.config.heartbeatMs },
+    detail: { gapMs: durationMs, thresholdMs: ctx.config.heartbeatMs, route: snap.route, visibility: snap.visibility, cores: snap.cores },
   });
-  log('warn', `[L1] renderer UI thread blocked ${durationMs}ms`);
+  log('warn', `[L1] renderer UI thread blocked ${durationMs}ms${snap.route ? ` on ${snap.route}` : ''}`);
 }

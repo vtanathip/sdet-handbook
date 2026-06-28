@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildReport } from '../../src/report.js';
@@ -51,4 +51,30 @@ export function run(): void {
   assert.ok(html.includes('onClick'), 'html has root-cause script attribution');
   assert.ok(html.includes('Next step'), 'html has a fix suggestion');
   assert.ok(html.includes('rendering invoice #4821'), 'html shows app-domain breadcrumbs');
+
+  // Highlighting + the culprit fix: a main-loop freeze must name its HANDLER as the root cause (not a
+  // renderer offset), a high-confidence freeze must rank above demoted noise, and per-layer reports
+  // must be written.
+  const dir2 = mkdtempSync(join(tmpdir(), 'em-selfcheck2-'));
+  writeFileSync(join(dir2, 'actions.jsonl'),
+    JSON.stringify({ name: 'click Main busy', startIso: iso(100), endIso: iso(3200) }) + '\n');
+  writeFileSync(join(dir2, 'freezes.jsonl'),
+    // a real bug: main loop blocked by a named handler, corroborated, tied to a click
+    JSON.stringify({ layer: 'main-loop', startIso: iso(150), durationMs: 3000, severity: 'SEVERE', detail: { maxLagMs: 3000, blockingChannel: 'reconcile-ledger', blockingKind: 'handle', blockingMs: 2950 } }) + '\n' +
+    JSON.stringify({ layer: 'renderer-heartbeat', startIso: iso(160), durationMs: 3000, severity: 'SEVERE', detail: { gapMs: 3000, route: '/ledger' } }) + '\n' +
+    // pure noise: a lone idle console.error
+    JSON.stringify({ layer: 'js-error', startIso: iso(60_000), durationMs: 0, severity: 'MINOR', detail: { kind: 'console.error', where: 'renderer', message: 'tidy up later' } }) + '\n');
+
+  const r2 = buildReport(dir2, {
+    sessionStartIso: iso(0), sessionEndIso: iso(70_000),
+    appLabel: './demo-app', launchMode: 'source', thresholdMs: 200, loafSupported: true, mainLayers: true,
+  });
+  const md2 = readFileSync(r2.mdPath, 'utf8');
+  assert.ok(md2.includes("reconcile-ledger"), 'main-loop root cause names the blocking handler');
+  assert.ok(md2.includes('🔎 Start here'), 'report highlights the most likely bug');
+  assert.ok(md2.includes('Where to look next'), 'report tells you where to drill in');
+  assert.ok(md2.includes('Likely noise'), 'low-confidence blips are demoted, not mixed in');
+  // the idle console.error must be in the noise bucket, the real freeze in the priority list
+  assert.ok(md2.indexOf('Start here') < md2.indexOf('Likely noise'), 'noise sorted below the real bug');
+  assert.ok(existsSync(join(dir2, 'layers', 'main-loop.md')), 'per-layer detail report is written');
 }

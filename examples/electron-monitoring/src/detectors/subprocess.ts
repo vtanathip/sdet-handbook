@@ -39,9 +39,18 @@ export class Subprocess implements Detector {
         if (e.kind === 'exit' && (e.code || e.signal)) {
           this.ctx.bus.emit({
             layer: 'subprocess', startIso: new Date(e.t).toISOString(), durationMs: 0, severity: 'SEVERE',
-            detail: { kind: 'subprocess-crashed', cmd: e.cmd, pid: e.pid, code: e.code, signal: e.signal },
+            // stderrTail is the headline — a non-zero exit's stderr IS the root cause.
+            detail: { kind: 'subprocess-crashed', cmd: e.cmd, argv: e.argv, pid: e.pid, code: e.code, signal: e.signal, stderrTail: e.stderrTail },
           });
-          log('error', `[SUBPROC] ${e.cmd} (pid ${e.pid}) exited abnormally code=${e.code} signal=${e.signal}`);
+          log('error', `[SUBPROC] ${e.argv || e.cmd} (pid ${e.pid}) exited abnormally code=${e.code} signal=${e.signal}`);
+        } else if (e.kind === 'error') {
+          // A spawn that failed outright (ENOENT — binary not on PATH) was silent before. The message
+          // ('spawn ffmpeg ENOENT') is the exact fix pointer.
+          this.ctx.bus.emit({
+            layer: 'subprocess', startIso: new Date(e.t).toISOString(), durationMs: 0, severity: 'SEVERE',
+            detail: { kind: 'subprocess-spawn-error', cmd: e.cmd, argv: e.argv, pid: e.pid, message: e.message },
+          });
+          log('error', `[SUBPROC] spawn failed: ${e.message} — ${e.argv || e.cmd}`);
         }
       }
       for (const c of await this.ctx.mainBridge.readLiveChildren()) {

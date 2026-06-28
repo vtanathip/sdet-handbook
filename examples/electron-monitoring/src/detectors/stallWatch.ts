@@ -13,7 +13,25 @@ import { log } from '../util/logger.js';
 // (IPC-reply latency — invoke() that never resolves — is a natural extension but needs wrapping
 // ipcMain.handle, which only catches handlers registered after attach; left out for now.)
 
-interface Tracked { url: string; start: number; resolvedAt?: number; flagged?: boolean }
+interface Tracked {
+  url: string; start: number; resolvedAt?: number; flagged?: boolean;
+  method?: string; resourceType?: string;
+  initiator?: string;   // 'loadCart @ app.js:212:9' — YOUR code that started it (the call site to fix)
+  errorText?: string;   // net::ERR_* when it failed (DNS, timeout, blocked) — the actual failure
+  blockedReason?: string;
+}
+
+// Compact "who started this request" string from the CDP initiator: prefer the top script frame.
+function initiatorOf(ini?: {
+  type?: string; url?: string; lineNumber?: number;
+  stack?: { callFrames?: Array<{ functionName?: string; url?: string; lineNumber?: number; columnNumber?: number }> };
+}): string {
+  if (!ini) return '';
+  const f = ini.stack?.callFrames?.[0];
+  if (f) return `${f.functionName || '(anonymous)'} @ ${f.url}:${(f.lineNumber ?? 0) + 1}:${(f.columnNumber ?? 0) + 1}`;
+  if (ini.url) return `${ini.type} @ ${ini.url}${ini.lineNumber != null ? ':' + (ini.lineNumber + 1) : ''}`;
+  return ini.type ?? '';
+}
 
 export class StallWatch implements Detector {
   readonly name = 'stall';
@@ -26,15 +44,25 @@ export class StallWatch implements Detector {
     try {
       this.cdp = await this.ctx.page.context().newCDPSession(this.ctx.page);
       await this.cdp.send('Network.enable');
-      this.cdp.on('Network.requestWillBeSent', (e: { requestId: string; request: { url: string } }) => {
-        this.inflight.set(e.requestId, { url: e.request.url, start: Date.now() });
+      this.cdp.on('Network.requestWillBeSent', (e: {
+        requestId: string; type?: string; request: { url: string; method?: string };
+        initiator?: Parameters<typeof initiatorOf>[0];
+      }) => {
+        this.inflight.set(e.requestId, {
+          url: e.request.url, start: Date.now(),
+          method: e.request.method, resourceType: e.type, initiator: initiatorOf(e.initiator),
+        });
       });
-      const resolve = (e: { requestId: string }) => {
+      this.cdp.on('Network.loadingFinished', (e: { requestId: string }) => {
         const t = this.inflight.get(e.requestId);
         if (t) t.resolvedAt = Date.now();
-      };
-      this.cdp.on('Network.loadingFinished', resolve);
-      this.cdp.on('Network.loadingFailed', resolve);
+      });
+      // A request that "resolved" by FAILING isn't slow — the errorText is the root cause (bad DNS,
+      // server down, blocked by CSP). Capture it.
+      this.cdp.on('Network.loadingFailed', (e: { requestId: string; errorText?: string; blockedReason?: string }) => {
+        const t = this.inflight.get(e.requestId);
+        if (t) { t.resolvedAt = Date.now(); t.errorText = e.errorText; t.blockedReason = e.blockedReason; }
+      });
       this.timer = setInterval(() => this.poll(), 1000);
     } catch (err) {
       log('warn', '[L8] stall watch unavailable for this target', err);
@@ -62,8 +90,13 @@ export class StallWatch implements Detector {
         layer: 'stall',
         startIso: new Date(t.start).toISOString(),
         durationMs: age,
-        severity: resolved ? severityFor(age) : 'SEVERE', // never-resolved is always worst
-        detail: { kind: 'request', target: t.url, ageMs: age, resolved },
+        // never-resolved OR resolved-by-failing is the worst; a merely-slow success scales by duration.
+        severity: !resolved || t.errorText ? 'SEVERE' : severityFor(age),
+        detail: {
+          kind: 'request', target: t.url, ageMs: age, resolved,
+          method: t.method, resourceType: t.resourceType, initiator: t.initiator,
+          errorText: t.errorText, blockedReason: t.blockedReason,
+        },
       });
     }
     await this.cdp?.detach().catch(() => {});

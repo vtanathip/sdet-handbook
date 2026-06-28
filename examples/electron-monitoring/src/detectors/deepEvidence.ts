@@ -26,17 +26,31 @@ const TRACE_CATEGORIES = [
 const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T | undefined> =>
   Promise.race([p.catch(() => undefined), new Promise<undefined>((r) => setTimeout(() => r(undefined), ms))]);
 
+// ponytail: cap our Node-side trace buffer — a whole-run trace grows unbounded (measured tens of MB
+// of JS objects in a ~30s run). Drops the OLDEST events past the cap (early freezes), keeping the
+// recent window, and warns so the truncation is never silent. NB: this bounds the HARNESS process
+// only; the dominant cost is Chromium's separate Tracing Service process (~120MB in that 30s run),
+// which is inherent to whole-run CDP Tracing — trim TRACE_CATEGORIES or make L6 opt-in for long runs.
+const MAX_TRACE_EVENTS = 300_000;
+
 export class DeepEvidence implements Detector {
   readonly name = 'deep';
   private cdp?: CDPSession;
   private chunks: unknown[] = [];
+  private dropped = 0;
   private tracing = false;
   constructor(private readonly ctx: DetectorCtx) {}
 
   async start(): Promise<void> {
     try {
       this.cdp = await this.ctx.page.context().newCDPSession(this.ctx.page);
-      this.cdp.on('Tracing.dataCollected', (e: { value: unknown[] }) => this.chunks.push(...e.value));
+      this.cdp.on('Tracing.dataCollected', (e: { value: unknown[] }) => {
+        this.chunks.push(...e.value);
+        if (this.chunks.length > MAX_TRACE_EVENTS) {
+          this.dropped += this.chunks.length - MAX_TRACE_EVENTS;
+          this.chunks.splice(0, this.chunks.length - MAX_TRACE_EVENTS);
+        }
+      });
       const started = await withTimeout(
         this.cdp.send('Tracing.start', {
           traceConfig: { includedCategories: TRACE_CATEGORIES },
@@ -59,6 +73,7 @@ export class DeepEvidence implements Detector {
       await withTimeout(done, 8000);
       await writeFile(join(this.ctx.runDir, 'trace.json'), JSON.stringify({ traceEvents: this.chunks }));
       log('info', `[L6] wrote trace.json (${this.chunks.length} events)`);
+      if (this.dropped > 0) log('warn', `[L6] trace truncated: dropped ${this.dropped} oldest events (cap ${MAX_TRACE_EVENTS}) — earliest part of the run is not in trace.json`);
     } catch (err) {
       log('warn', '[L6] failed to flush trace.json', err);
     } finally {
