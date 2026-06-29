@@ -55,6 +55,9 @@ export function run(): void {
   assert.ok(html.includes('onClick'), 'html has root-cause script attribution');
   assert.ok(html.includes('Next step'), 'html has a fix suggestion');
   assert.ok(html.includes('rendering invoice #4821'), 'html shows app-domain breadcrumbs');
+  assert.ok(html.includes('Host uptime') && html.includes('40d'), 'html shows host uptime as run context');
+  assert.ok(html.includes('envnote') && html.includes('Host has been up'),
+    'high uptime + freezes surfaces the soft environmental note in html');
 
   // Highlighting + the culprit fix: a main-loop freeze must name its HANDLER as the root cause (not a
   // renderer offset), a high-confidence freeze must rank above demoted noise, and per-layer reports
