@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { severityFor, type FreezeEvent, type FreezeLayer, type Severity } from './freezeBus.js';
 import type { ActionWindow } from './currentAction.js';
 import { correlate } from './correlator.js';
+import { resolveLoc } from './util/sourcemap.js';
 
 // Reads the JSONL evidence streams a run produced, merges overlapping detector events into
 // freeze "incidents", attributes each to a UI action, computes the verdict + exit code
@@ -342,13 +343,13 @@ function evidenceLine(e: FreezeEvent): string {
       if (d.topChannel) return `channel '${String(d.topChannel)}' (${String(d.topTransport ?? 'send')}) sent ${Number(d.msgs).toLocaleString()} msgs in one interval — ${String(d.topPct)}% of traffic (~${String(d.ratePerSec)}/s)`;
       return `${String(d.msgs)} IPC messages in one interval (~${String(d.ratePerSec)}/s)`;
     case 'js-error': {
-      const at = d.topFrame ? ` — at ${String(d.topFrame)}` : '';
+      const at = d.topFrame ? ` — at ${resolveLoc(String(d.topFrame))}` : '';
       return `${String(d.kind)}${d.where ? ` [${String(d.where)}]` : ''}: ${String(d.message ?? '')}${at}`;
     }
     case 'stall': {
       const shape = `${String(d.resourceType ?? 'request')}${d.method ? ` ${String(d.method)}` : ''}`;
       const fail = d.errorText ? ` — FAILED ${String(d.errorText)}${d.blockedReason ? ` / ${String(d.blockedReason)}` : ''}` : '';
-      const by = d.initiator ? ` (started by ${String(d.initiator)})` : '';
+      const by = d.initiator ? ` (started by ${resolveLoc(String(d.initiator))})` : '';
       return `${shape} stuck ${Math.round(Number(d.ageMs ?? e.durationMs) / 1000)}s — ${String(d.target ?? '')}${fail}${by}`;
     }
     case 'storage':
