@@ -732,6 +732,12 @@ function renderHtml(a: {
     <span class="sh-why">confidence ${confLabel(top)}: ${esc(top.confidenceReasons?.join(' · ') ?? '')}</span></span>
   </a>` : '';
 
+  // Soft environmental note (mirrors the markdown report): a long-up host can cause freezes a fresh
+  // boot wouldn't — shown only when uptime is high AND freezes occurred. Never changes the verdict.
+  const envNote = (meta.hostUptimeSec != null && meta.hostUptimeSec > HIGH_UPTIME_SEC && incidents.length > 0)
+    ? `<div class="envnote">⚠️ <b>Host has been up ${fmtUptime(meta.hostUptimeSec)}.</b> Long uptime can degrade a machine (memory fragmentation, leaked file descriptors, stale GPU/driver state); these freezes may reflect the environment, not the app. Re-run on a freshly-booted host to confirm.</div>`
+    : '';
+
   const timelineRows = incidents.map((i, n) => {
     const w = Math.max(6, Math.round((i.durationMs / barMax) * 100));
     return `<a class="tl-row" href="#inc${n}">
@@ -790,6 +796,7 @@ function renderHtml(a: {
   .banner.PASS{background:var(--ok)}.banner.CAUTION{background:var(--mod)}.banner.FAIL{background:var(--sev)}
   .meta{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:.85rem;color:var(--muted);margin-bottom:22px}
   .meta b{color:var(--fg);font-weight:600}
+  .envnote{background:#fffbeb;border:1px solid #fde68a;border-left:4px solid var(--mod);color:#92400e;border-radius:10px;padding:10px 14px;margin:0 0 18px;font-size:.88rem}
   h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:26px 0 10px;border-bottom:1px solid var(--line);padding-bottom:6px}
   /* timeline */
   .tl-row{display:flex;align-items:center;gap:12px;padding:7px 8px;border-radius:8px;text-decoration:none;color:inherit}
@@ -846,7 +853,9 @@ function renderHtml(a: {
     <span><b>When:</b> ${hhmmss(meta.sessionStartIso)}–${hhmmss(meta.sessionEndIso)}</span>
     <span><b>Threshold:</b> ${meta.thresholdMs}ms</span>
     <span><b>Gate:</b> ${esc(a.baselineLabel ?? 'absolute (≥3s = FAIL)')}</span>
+    ${meta.hostUptimeSec != null ? `<span><b>Host uptime:</b> ${fmtUptime(meta.hostUptimeSec)}</span>` : ''}
   </div>
+  ${envNote}
   ${incidents.length === 0 ? '<div class="empty">🎉 Nothing froze. Nice.</div>' : `
   ${startHere}
   <h2>Timeline — which action froze, and for how long</h2>
