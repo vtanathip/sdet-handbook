@@ -27,7 +27,12 @@ export interface ReportMeta {
   sessionStartIso: string; sessionEndIso: string;
   appLabel: string; launchMode: string; thresholdMs: number; loafSupported: boolean;
   mainLayers: boolean;
+  hostUptimeSec?: number; // seconds since the host last booted — run context, never gated on
 }
+
+// ponytail: 14d — long enough that environmental degradation is plausible; bump if your CI reboots
+// rarely. Only surfaces a note when freezes ALSO occurred (uptime alone never fails a green run).
+const HIGH_UPTIME_SEC = 14 * 24 * 3600;
 
 export interface ReportResult {
   verdict: 'PASS' | 'CAUTION' | 'FAIL'; exitCode: number;
@@ -239,6 +244,11 @@ function fmtDur(ms: number): string {
   if (h >= 1) return `${h}h ${m % 60}m ${s % 60}s`;
   if (m >= 1) return `${m}m ${s % 60}s`;
   return `${s}s`;
+}
+// Uptime can be days/weeks — fmtDur would print "912h", so format days+hours.
+function fmtUptime(sec: number): string {
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  return d >= 1 ? `${d}d ${h}h` : h >= 1 ? `${h}h ${m}m` : `${m}m`;
 }
 function fmtMB(kb: number): string {
   const mb = kb / 1024;
@@ -597,10 +607,19 @@ function renderMarkdown(a: {
   L.push(`| Session | ${start.toTimeString().slice(0, 8)} → ${end.toTimeString().slice(0, 8)} (${fmtDur(end.getTime() - start.getTime())}) |`);
   L.push(`| App | ${meta.appLabel} |`);
   L.push(`| Launch Mode | ${meta.launchMode}${meta.mainLayers ? '' : ' (main-process layers L3/L4/L5/L7 unavailable)'} |`);
+  if (meta.hostUptimeSec != null) L.push(`| Host uptime | ${fmtUptime(meta.hostUptimeSec)} |`);
   L.push(`| Main-process layers | ${meta.mainLayers ? 'available' : 'unavailable (plain cdp — add --inspect)'} |`);
   L.push(`| Freeze Threshold | ${meta.thresholdMs}ms |`);
   L.push(`| Gate | ${a.baselineLabel ?? 'absolute thresholds (no baseline) — perception-anchored: ≥3s = FAIL'} |`);
   L.push(`| **Verdict** | **${VERDICT_EMOJI[verdict]} ${verdict}** |`, '');
+
+  // Soft environmental note: a long-up host can degrade (memory fragmentation, leaked fds, stale GPU
+  // state) and make freezes that a fresh boot wouldn't. Context for triage, not a verdict change.
+  if (meta.hostUptimeSec != null && meta.hostUptimeSec > HIGH_UPTIME_SEC && incidents.length > 0) {
+    L.push(`> ⚠️ **Host has been up ${fmtUptime(meta.hostUptimeSec)}.** Long uptime can degrade a machine`
+      + ` (memory fragmentation, leaked file descriptors, stale GPU/driver state); these freezes may`
+      + ` reflect the environment, not the app. Re-run on a freshly-booted host to confirm.`, '');
+  }
 
   const { signal, noise } = rankIncidents(incidents);
   if (incidents.length === 0) {
