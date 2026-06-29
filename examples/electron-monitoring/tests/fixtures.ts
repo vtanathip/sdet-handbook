@@ -4,6 +4,7 @@ import {
   type BrowserContext, type ElectronApplication, type Page,
 } from 'playwright';
 import { join } from 'node:path';
+import { createWriteStream, type WriteStream } from 'node:fs';
 import { loadConfig } from '../src/config.js';
 import { Monitor } from '../src/monitor.js';
 import { setAction, clearAction } from '../src/currentAction.js';
@@ -34,6 +35,7 @@ export const test = base.extend<{ app: Harness }>({
     let context: BrowserContext;
     let window: Page;
     let mainBridge: MainBridge | undefined;
+    let procLog: WriteStream | undefined;
     let tearingDown = false;
 
     if (cfg.launchMode === 'cdp') {
@@ -54,12 +56,22 @@ export const test = base.extend<{ app: Harness }>({
       // runners) the child runs as plain Node and rejects Chromium flags. No-op in a clean env.
       const env = { ...process.env };
       delete env.ELECTRON_RUN_AS_NODE;
+      // Route Chromium's internal logs to stderr so they land in process.log (renderer-hung, GPU /
+      // network-service crashes — none of which reach the renderer console). Respect a user override.
+      if (!('ELECTRON_ENABLE_LOGGING' in env)) env.ELECTRON_ENABLE_LOGGING = '1';
       const launchOpts: { args: string[]; env: Record<string, string>; recordVideo?: { dir: string } } = {
         args: [cfg.appPath],
         env: env as Record<string, string>,
       };
       if (cfg.recordVideo) launchOpts.recordVideo = { dir: runDir };
       electronApp = await electron.launch(launchOpts);
+      // Capture the app's own stdout+stderr → process.log: main-process console.* plus the Chromium
+      // internal logs enabled above. The text companion to trace.json for deep investigation.
+      procLog = createWriteStream(join(runDir, 'process.log'));
+      procLog.on('error', () => {}); // fd may close mid-write as the app exits — don't throw
+      const proc = electronApp.process();
+      proc.stdout?.pipe(procLog, { end: false });
+      proc.stderr?.pipe(procLog, { end: false });
       window = await electronApp.firstWindow();
       context = electronApp.context();
       mainBridge = new ElectronAppBridge(electronApp);
@@ -101,6 +113,7 @@ export const test = base.extend<{ app: Harness }>({
     await actionsLog.close();
     const video = cfg.recordVideo ? window.video() : undefined;
     if (electronApp) await electronApp.close().catch(() => {});
+    procLog?.end(); // piped with end:false, so close it ourselves after the app exits
     await video?.saveAs(join(runDir, 'video.webm')).catch(() => {});
   },
 });

@@ -2,13 +2,15 @@ import { run as heartbeat } from '../../tests/selfchecks/heartbeat.selfcheck.js'
 import { run as eventloop } from '../../tests/selfchecks/eventloop.selfcheck.js';
 import { run as correlator } from '../../tests/selfchecks/correlator.selfcheck.js';
 import { run as report } from '../../tests/selfchecks/report.selfcheck.js';
+import { run as sourcemap } from '../../tests/selfchecks/sourcemap.selfcheck.js';
 
-// Runs the four pure self-checks (no Electron, no browser). `npm run selfcheck`.
+// Runs the pure self-checks (no Electron, no browser). `npm run selfcheck`.
 const checks: [string, () => void | Promise<void>][] = [
   ['heartbeat', heartbeat],
   ['eventloop', eventloop],
   ['correlator', correlator],
   ['report', report],
+  ['sourcemap', sourcemap],
 ];
 
 let failed = 0;

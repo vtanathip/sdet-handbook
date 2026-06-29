@@ -52,6 +52,8 @@ Open the report:
 ```bash
 open runs/<timestamp>/report.html                   # visual timeline (which click froze)
 cat  runs/<timestamp>/electron-freeze-report-*.md   # CI sign-off
+cat  runs/<timestamp>/process.log                   # Electron's own stdout+stderr (source mode):
+#   main-process console.* + Chromium internal logs (renderer-hung, GPU/network-service crashes)
 # trace.json → load in chrome://tracing, Perfetto, or DevTools → Performance (import);
 #   it embeds CPU samples, so the hung call stack is in there.
 ```

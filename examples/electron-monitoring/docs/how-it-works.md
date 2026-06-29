@@ -24,6 +24,7 @@ playwright test
        ├─ Monitor.start()  → all detectors, each polling every 250ms, all pushing onto FreezeBus
        │     L1 rendererHeartbeat   L2 rendererTasks    L6 deepEvidence    (renderer / CDP)
        │     L3 mainLoopLag         L4 appMetrics       L5 nativeSignals   (main process)
+       ├─ (source mode) pipe Electron's stdout+stderr → process.log (ELECTRON_ENABLE_LOGGING=1)
        ├─ step('click X', …)  → records [start,end] to actions.jsonl
        └─ teardown: Monitor.stop() flushes JSONL + trace.json; save video (if RECORD_VIDEO=1)
   └─ tests/global-teardown.ts
@@ -135,6 +136,12 @@ inspector's `Runtime.evaluate(expr)` with `require`).
   and the Electron entry points are the parts most likely to shift between releases.
 - **LoAF requires Chromium ≥123 (Electron ≥30).** On older Electron, L2 degrades to `longtask` only
   and the report shows *LoAF attribution: unavailable*.
+- **Source-map resolution is best-effort.** At report time the reported `file:line:col` for JS errors
+  (top frame) and stuck-request initiators is resolved back to original source via an adjacent `.map`
+  ([src/util/sourcemap.ts](../src/util/sourcemap.ts), stdlib `node:module` `SourceMap`) — so a bundled
+  app shows `src/cart.ts:212`, not `index-abc123.js`. `file://` URLs only; no map → the generated
+  location is shown unchanged. L2's LoAF char-offsets aren't mapped yet (they already carry a DOM
+  `invoker` like `BUTTON#save.onclick`).
 - **Windows vs macOS:** `memory.workingSetSize` is the private working set on Windows and resident
   memory on macOS, so L4 gates on a growth *ratio*, never absolute MB. The GPU process may run
   in-process on macOS under some flags. The verdict gates on freeze *timing*, not memory.
