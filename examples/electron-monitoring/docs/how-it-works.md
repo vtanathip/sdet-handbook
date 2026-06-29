@@ -102,6 +102,13 @@ The thresholds come from two principled places, never thin air:
 Playwright's own exit code only reflects test errors, so [src/signoff.ts](../src/signoff.ts) runs the
 suite and then exits with the verdict code for CI gating.
 
+**Host context (never gated on).** `startRun()` records the host's uptime, load average and free
+memory into `meta.json`, and the report shows a **Host uptime** row. A long-up box can degrade
+(memory fragmentation, leaked fds, stale GPU/driver state) and cause freezes a fresh boot wouldn't —
+so when uptime is high (>14d) **and** freezes occurred, the report adds a soft note suggesting a
+re-run on a fresh boot. It's triage context only: uptime never changes the verdict, because uptime
+alone doesn't predict freezes (a freshly-booted box can be slow too).
+
 ### Measurement overhead (observer effect)
 
 Measuring perturbs the app, but bounded: renderer-compute overhead is below the noise floor, IPC

@@ -26,6 +26,7 @@ export function run(): void {
   const result = buildReport(dir, {
     sessionStartIso: iso(0), sessionEndIso: iso(5000),
     appLabel: './demo-app', launchMode: 'source', thresholdMs: 200, loafSupported: true, mainLayers: true,
+    hostUptimeSec: 40 * 24 * 3600, // 40d up + freezes → the soft environmental note should appear
   });
 
   assert.equal(result.verdict, 'FAIL', 'a 4.2s freeze is FAIL');
@@ -43,6 +44,9 @@ export function run(): void {
   assert.ok(md.includes('onClick'), 'md has root-cause script attribution');
   assert.ok(md.includes('Next step:'), 'md has a fix suggestion');
   assert.ok(md.includes('rendering invoice #4821'), 'md shows app-domain breadcrumbs before the freeze');
+  assert.ok(md.includes('Host uptime | 40d'), 'md shows host uptime as run context');
+  assert.ok(md.includes('Host has been up') && md.includes('environment, not the app'),
+    'high uptime + freezes surfaces the soft environmental note');
 
   const html = readFileSync(result.htmlPath, 'utf8');
   assert.ok(html.includes('tl-fill'), 'html has the timeline');

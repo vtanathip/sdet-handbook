@@ -21,6 +21,7 @@ export default function globalTeardown(): void {
     thresholdMs: cfg.heartbeatMs,
     loafSupported: (m.loafSupported as boolean) ?? false,
     mainLayers: (m.mainLayers as boolean) ?? false,
+    hostUptimeSec: m.hostUptimeSec as number | undefined,
   });
 
   writeFileSync(join(dir, 'result.json'), JSON.stringify({ verdict: result.verdict, exitCode: result.exitCode }, null, 2));
