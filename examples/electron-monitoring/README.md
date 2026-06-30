@@ -1,200 +1,372 @@
 # electron-monitoring
 
-Playwright-driven freeze detection for Electron apps. Runs scenarios against an Electron app,
-watches **every layer** of the Chromium/Node stack at once, **names the root cause** of each freeze
-(the blocking IPC handler, the script call-site, the flooding channel…), correlates it to the **UI
-action that triggered it**, **ranks** freezes by confidence, and produces a **Markdown sign-off
-report + a visual HTML timeline**. Gate on perception-anchored thresholds, or record a **baseline**
-and gate on *regression vs a known-good run*.
+A **client-performance sign-off + evidence tracer** for Electron apps. It drives a real Playwright
+scenario (open → log in → click → interact) against your app, **captures everything every layer did**
+— and traces each event back to the **app code that caused it** — then either:
 
-It's the Electron sibling of [`process-watchdog`](../process-watchdog) (which does the same for
-Excel via Win32 `SendMessageTimeout`). Same verdict contract (PASS / CAUTION / FAIL + CI exit codes),
-different target.
+- **without a baseline** → produces a single-run **evidence report** (what the app did + a freeze
+  verdict), or
+- **with a baseline** → compares this build against a previous one and produces a **performance
+  sign-off**: a budget-gated scorecard of per-`(route × step)` regressions in **timing and freezing**,
+  a route×metric / step×metric matrix, and a **differential flamegraph** of where CPU time moved.
 
-## Why
+It's the sign-off gate you run after functional regression passes, to answer one question:
+**did the new build get slower or jankier than the last one — and where, and which code is to blame?**
 
-An Electron app can freeze for very different reasons, and a single probe can't tell them apart:
+---
 
-Each layer doesn't just *detect* a freeze — it **names the root cause** so you know where to look:
+## Table of contents
 
-| Layer | Module | What it catches → and names | API |
-|-------|--------|-----------------------------|-----|
-| L1 renderer heartbeat | [rendererHeartbeat.ts](src/detectors/rendererHeartbeat.ts) | renderer **UI thread** blocked → how long + **which route** + core count | injected rAF + `setInterval` gap |
-| L2 task attribution | [rendererTasks.ts](src/detectors/rendererTasks.ts) | **which call-site** blocked (`BUTTON#save.onclick`) + **script-vs-layout** split + thrash/sync-block hints | `PerformanceObserver` `longtask` + `long-animation-frame` (LoAF) |
-| L3 main-loop lag | [mainLoopLag.ts](src/detectors/mainLoopLag.ts) | **main process** event loop stalled → names the **ipcMain handler** that blocked it (or "no handler → compute/GC/sync-IO") | main-process timer lateness + per-handler timing |
-| L4 hardware | [appMetrics.ts](src/detectors/appMetrics.ts) | sustained CPU / memory balloon → the **specific process + pid** (incl. which utility, e.g. Network Service) | `app.getAppMetrics()` |
-| L5 native | [nativeSignals.ts](src/detectors/nativeSignals.ts) | Chromium **unresponsive** / **crash** → the **window** (title+url) or **child process** + reason (oom/killed) | `webContents` events, `render-process-gone`, `child-process-gone` |
-| L7 IPC flush | [ipcFlood.ts](src/detectors/ipcFlood.ts) | **IPC flood / backpressure** → the **flooding channel** + its % share (send **and** invoke) | `ipcMain.emit` + `handle`, per-channel counter |
-| L8 stall | [stallWatch.ts](src/detectors/stallWatch.ts) | **stuck async op** (spinner) → the **initiator call-site** + failure reason (DNS/timeout/blocked) | CDP `Network` in-flight age + `initiator` |
-| JS errors | [jsErrors.ts](src/detectors/jsErrors.ts) | uncaught / unhandledrejection / console → full **stack + file:line** top frame; preload-vs-renderer-vs-main | `pageerror`/`console` + main `uncaughtException` |
-| Storage | [storageDisk.ts](src/detectors/storageDisk.ts) | storage quota / disk-low / slow-disk → which **storage system** + origin + volume path | `storage.estimate()` + `statfs` + I/O canary |
-| Subprocess | [subprocess.ts](src/detectors/subprocess.ts) | `child_process` spawn that **hangs or crashes** → argv + **stderr tail** (the actual error) | child_process patch (cdp+inspect only) |
-| Main death | [mainDeath.ts](src/mainDeath.ts) | the **whole app dies** (uncaught main exception, OOM, SIGKILL) | `electronApp.process` exit (source mode) |
-| L6 deep evidence | [deepEvidence.ts](src/detectors/deepEvidence.ts) | the **hung call stack** | CDP `Tracing` → `trace.json` (with embedded CPU samples) |
-| Breadcrumbs | [breadcrumbs.ts](src/detectors/breadcrumbs.ts) | **app-domain context** — the app's own log lines, shown "just before" each freeze | `page.on('console')`, all levels → `breadcrumbs.jsonl` |
+- [Install](#install)
+- [The two ways to run it](#the-two-ways-to-run-it)
+  - [Without a baseline (single-run evidence)](#a-without-a-baseline--single-run-evidence)
+  - [With a baseline (build-vs-build sign-off)](#b-with-a-baseline--build-vs-build-sign-off)
+- [Pointing it at your app](#pointing-it-at-your-app)
+  - [Source mode](#source-mode-harness-launches-the-app)
+  - [Attach mode (packaged build)](#attach-mode-attach-to-a-packaged-build)
+- [Writing a scenario](#writing-a-scenario)
+- [What it captures (and how it's traced)](#what-it-captures-and-how-its-traced)
+- [The reports](#the-reports)
+- [The performance gate](#the-performance-gate)
+- [Command reference](#command-reference)
+- [Configuration (env vars)](#configuration-env-vars)
+- [Run artifacts](#run-artifacts)
+- [CI integration](#ci-integration)
+- [Limits & caveats](#limits--caveats)
 
-Each detector emits onto a shared bus; the reporter merges overlapping detections into freeze
-*incidents*, attributes each to the in-flight `step()`, **ranks them by confidence** (how many layers
-agree × tied to an action × named cause), leads with a **🔎 Start here** pick, demotes low-confidence
-blips to a **Likely noise** bucket, and writes a **per-layer drill-down report** for each layer that
-fired. See [the report section](#the-report--what-it-tells-you) below.
+---
 
-## Quick start
+## Install
 
 ```bash
-npm install                   # also downloads the Electron binary (electron postinstall)
-npm run selfcheck             # 4 pure self-checks (no Electron) — heartbeat, eventloop, correlator, report
-npm test                      # launches the demo app, runs the freeze sweep, writes the report
+npm install          # also downloads the Electron binary (electron postinstall)
+npm run selfcheck    # 8 pure self-checks, no Electron — sanity-checks the logic
+npm test             # launches the bundled demo app, runs the scenario, writes a report
 ```
 
-Open the report:
+`npm run selfcheck` should print 8 green checks (`heartbeat`, `eventloop`, `correlator`, `report`,
+`sourcemap`, `compare`, `ipc-renderer-tap`, `storage-tap`). If those pass, the install is good.
+
+---
+
+## The two ways to run it
+
+A **run** = one execution of the scenario against one build. It writes a timestamped directory under
+`runs/<timestamp>/` containing every evidence stream plus a report. You can consume a run two ways.
+
+### A. Without a baseline — single-run evidence
+
+Run the scenario once and read the report. You get the full per-layer evidence (every IPC message,
+storage write, network call, etc., each traced to the code that issued it) plus a freeze verdict
+(PASS / CAUTION / FAIL on perception-anchored thresholds — a freeze ≥3s is a FAIL).
 
 ```bash
-open runs/<timestamp>/report.html                   # visual timeline (which click froze)
-cat  runs/<timestamp>/electron-freeze-report-*.md   # CI sign-off
-cat  runs/<timestamp>/process.log                   # Electron's own stdout+stderr (source mode):
-#   main-process console.* + Chromium internal logs (renderer-hung, GPU/network-service crashes)
-# trace.json → load in chrome://tracing, Perfetto, or DevTools → Performance (import);
-#   it embeds CPU samples, so the hung call stack is in there.
+npm test                                  # source mode, against the bundled demo app
+open runs/<timestamp>/report.html         # the evidence dashboard
 ```
 
-See a captured example: [docs/sample-report.md](docs/sample-report.md) (and the
-[HTML timeline](docs/sample-report.html) — artifact links there are per-run, not bundled).
+Use this when you want to **see what one build does** — debug a freeze, inspect IPC/storage/network
+traffic, find who wrote a localStorage key. No second build needed.
 
-For a CI gate that exits with the verdict code (0 PASS / 1 CAUTION / 2 FAIL):
+### B. With a baseline — build-vs-build sign-off
+
+This is the sign-off gate. Run the **same scenario** against the **old build** and the **new build**,
+then diff them. Two ways to do the diff:
+
+**1) Dedicated `compare` command** (recommended for ad-hoc two-build diffs):
 
 ```bash
-npm run signoff
+# 1. record the OLD build's run
+LAUNCH_MODE=... npm test        # → runs/<A>/   (the previous version)
+# 2. record the NEW build's run
+LAUNCH_MODE=... npm test        # → runs/<B>/   (the candidate version)
+# 3. diff them
+npm run compare -- runs/<A> runs/<B>
+#    → prints the scorecard, writes runs/<B>/compare-report.{md,html} + compare-result.json
+#    → exits 0 PASS / 1 CAUTION / 2 FAIL
 ```
 
-## The report — what it tells you
-
-The report leads with what matters and ranks the rest, so the real bug isn't buried in noise:
-
-- **🔎 Start here** — the single most likely bug (highest impact × confidence), with its root cause and where to look next.
-- **Freezes by priority** — a ranked table with a **confidence** column (how many independent layers agree × tied to a click × has a named cause), not a chronological dump.
-- **Diagnosis** — per incident: root cause, what happened, **Where to look next** (the exact artifact + filter to open), corroborating signals, and the app's breadcrumbs.
-- **Likely noise** — low-confidence single-layer idle blips, demoted so they don't bury the real bug.
-- **`layers/<layer>.md`** — a per-layer drill-down for each layer that fired; **`report.html`** — the visual timeline; **`result.json`** — `{verdict, exitCode}` for CI.
-
-### Verdict & thresholds — where the numbers come from
-
-Two kinds of threshold, by where their number legitimately comes from:
-
-- **Perception-anchored (default).** `200ms` = a freeze, `≥3s` = SEVERE/FAIL — grounded in HCI research (Nielsen 0.1/1/10s, Google RAIL, Web Vitals INP), *not* arbitrary. These ship as defaults and gate when there's no baseline.
-- **App-relative (baseline).** "How slow is too slow for *this* app" has no universal value — record a baseline and gate on **regression vs your known-good run** (next section).
-
-| Condition | Verdict | Exit |
-|-----------|---------|------|
-| no freeze (or all within baseline) | PASS | 0 |
-| a freeze, none ≥3s, no crash (or a non-severe regression) | CAUTION | 1 |
-| any freeze ≥3s, a crash, or a severe regression | FAIL | 2 |
-
-## Baseline — gate on regression, not a magic number
-
-A hardcoded "3s = fail" doesn't fit every app. Instead, record a **known-good ("green") run** and gate
-future runs on whether they got **worse**:
+**2) Saved baseline embedded in the run's own report** (recommended for CI):
 
 ```bash
-# 1. Record a baseline from a green run → writes ./freeze-baseline.json
-npm run baseline                       # = SAVE_BASELINE=./freeze-baseline.json playwright test
-
-# 2. Gate future runs against it — only NEW or materially-WORSE freezes fail
-BASELINE_FILE=./freeze-baseline.json npm test
-BASELINE_FILE=./freeze-baseline.json npm run signoff   # CI
-
-# tolerance: how much worse than green counts as a regression (default 1.2 = 20% worse)
-BASELINE_FILE=./freeze-baseline.json BASELINE_TOLERANCE=1.5 npm test
+# record the old build ONCE as the golden baseline
+npm run baseline                          # → writes ./build-baseline.json from this run
+# later, every new-build run auto-compares against it and embeds the diff in its report
+BASELINE_FILE=./build-baseline.json npm test
+#    the run's report gains a "Build comparison" section and the verdict folds in the regression
 ```
 
-With a baseline, freezes that match green are tagged **✓ within** and demoted; only **🔺 new** (a freeze
-on a layer the green run never had) or **🔺 worse** (past the tolerance) count as regressions and gate
-the verdict — a crash is always a regression. The report's **Gate** line shows which mode is active,
-and each freeze carries its baseline tag.
+Use this when you want to **gate a release** on "no client-perf regression vs the last shipped build."
 
-> Record the baseline against a **representative, known-good** session on representative hardware (it
-> stores per-layer worst-freeze durations from whatever run you point it at). `SAVE_BASELINE` /
-> `BASELINE_FILE` are plain env vars — on Windows use `cross-env` or set them in your shell.
+> The comparison joins the two runs **by scenario step name**, so both runs must execute the same
+> scenario. Routes are keyed by SPA hash / page basename, so they match across builds even though the
+> install path differs.
 
-## Watch mode — reproduce a freeze by hand
+---
 
-When you don't have a scripted repro, attach the monitor and drive the app yourself:
+## Pointing it at your app
+
+Set the target with env vars. Two launch modes:
+
+### Source mode (harness launches the app)
+
+Best for development and CI where you have the app source. The harness launches Electron, so it has
+full main-process access (all layers, IPC main tap, child-process tracking).
 
 ```bash
-npm run watch                                  # launches ./demo-app (or ELECTRON_APP_PATH)
-# … the app opens; click around and reproduce the freeze …
-# Ctrl+C  → writes the same report.html + .md
+ELECTRON_APP_PATH=/path/to/your/app npm test     # defaults to ./demo-app
 ```
 
-It keeps all detectors running the whole time, **captures your clicks** so each freeze is blamed on
-the button you pressed, and writes the report on stop. Attach to a packaged build the same way
-(`LAUNCH_MODE=cdp …`, plus `ELECTRON_INSPECT_ENDPOINT` for the main-process layers). Set
-`WATCH_MAX_SECONDS=N` to auto-stop instead of Ctrl+C (useful in CI).
+### Attach mode (attach to a packaged build)
 
-## The demo app
-
-[demo-app/](demo-app/) is a tiny Electron app with one button per freeze type (the analog of
-process-watchdog's `Freeze4s` VBA macros). **Don't copy these patterns into production** — they
-intentionally hang.
-
-| Button | Freeze | Layers | Verdict |
-|--------|--------|--------|---------|
-| Renderer block 4s | 4s renderer busy-loop | L1, L2, L6 | FAIL |
-| Renderer block 2s | 2s renderer busy-loop | L1, L2 | CAUTION |
-| Main busy 3s | IPC → main busy-loop | L3, L4 | FAIL |
-| Sync-IPC deadlock | `sendSync` into a blocked handler | L1, L3 | FAIL |
-| IPC flood | 50k `send` in a burst (queue can't flush) | L7 (+L1/L3 if heavy) | FAIL |
-| IPC jumbo payload | `invoke` a 1.5M-object structured clone | L1, L3 | CAUTION |
-| Memory balloon | ~720MB of arrays | L4 | CAUTION |
-| GPU / paint stall | heavy synchronous canvas | L2, L4 | CAUTION |
-| Crash renderer | `forcefullyCrashRenderer()` | L5 | FAIL |
-| Crash MAIN process | `process.crash()` in main | main-death | FAIL |
-| Stuck request | `fetch('hang://…')` that never resolves | L8 | FAIL |
-| Storage fill | write to Cache API | Storage* | CAUTION |
-| JS error | uncaught exception + console.error | JS errors | (advisory) |
-| Spawn child (hangs/crashes) | `child_process.spawn` sleep / exit 7 | Subprocess† | CAUTION/FAIL |
-| No freeze | append 1000 rows | — | PASS |
-
-\* Storage-pressure needs a real `http(s)`/custom-secure origin — Chromium reports 0 usage for `file://`, so the demo only exercises the sampler. † Subprocess tracking needs **cdp+inspect** (`require` isn't reachable in source-mode `evaluate`).
-
-A few triggers also `console.log` a domain-style line first (e.g. *"rendering 4000 line items for invoice #4821"*); the report shows those **breadcrumbs "just before"** the freeze, so you see what the app thought it was doing when it hung — the app-domain context a probe can't infer. Point this at your real app and its own `console`/`electron-log` output flows in automatically.
-
-## Point it at your real app
-
-Everything is config-driven (see [src/config.ts](src/config.ts)); defaults target the demo.
+The primary flow for monitoring a **real packaged build**. The build must be launched with the two
+debug flags so the harness can attach to the renderer (CDP) and the main process (Node inspector).
+`attach.ts` does this for you:
 
 ```bash
-# From source (full 6-layer coverage):
-ELECTRON_APP_PATH=/path/to/your/app npm test
+npm run attach -- /path/to/YourApp.app/Contents/MacOS/YourApp
+# launches the build with --remote-debugging-port + --inspect, waits for both endpoints,
+# runs the scenario against it, writes the run dir, then kills the build.
 
-# Packaged binary — launch it yourself with BOTH ports, then attach:
-#   YourApp.exe --remote-debugging-port=9222 --inspect=9229
+# ports/timeout are overridable:
+CDP_PORT=9222 INSPECT_PORT=9229 npm run attach -- ./dist/YourApp
+```
+
+Or wire it yourself by pointing at already-running endpoints:
+
+```bash
 LAUNCH_MODE=cdp \
-  ELECTRON_CDP_ENDPOINT=http://127.0.0.1:9222 \
-  ELECTRON_INSPECT_ENDPOINT=http://127.0.0.1:9229 \
-  npm test
+ELECTRON_CDP_ENDPOINT=http://127.0.0.1:9222 \
+ELECTRON_INSPECT_ENDPOINT=http://127.0.0.1:9229 \
+npm test
 ```
 
-**Two ports, all layers.** The renderer is Chromium (`--remote-debugging-port`); the main process is
-Node (`--inspect`). With **both**, the harness attaches a CDP session to the renderer *and* a
-Node-inspector session to the main process, so **all seven layers work on a packaged app**.
+> **`--inspect` matters.** With it, the main-process tap captures IPC across all windows and unlocks
+> the main-loop / hardware / native / subprocess layers. **Without** a main channel (plain CDP), the
+> harness falls back to a renderer-side `ipcRenderer` tap — which still captures IPC *and* the app
+> call-site, but only if `ipcRenderer` is reachable in the page (see [Limits](#limits--caveats)).
 
-If you give only `--remote-debugging-port` (no `--inspect`), the main-process layers (L3/L4/L5/L7) are
-dark — the report marks them *unavailable (plain cdp — add --inspect)*. Running **from source** also
-gives all layers.
+---
 
-> `--inspect` is respected by packaged apps unless the `EnableNodeCliInspectArguments` Electron fuse
-> was disabled. If `http://127.0.0.1:9229/json` is empty, the build has it off — use source mode, or
-> have the app open a debug port itself.
+## Writing a scenario
 
-**Env knobs:** `RECORD_VIDEO=1` adds a `video.webm` (off by default — `recordVideo` can jam Electron's
-CDP pipe in headless/displayless environments); `FREEZE_THRESHOLD_MS`, `MAIN_LOOP_MAX_MS`,
-`METRICS_INTERVAL_MS`, `DEEP_EVIDENCE_MIN_MS`, `IPC_STORM_MSGS`, `STALL_MS`, `STORAGE_PCT`,
-`DISK_LOW_BYTES`, `IO_SLOW_MS`, `SUBPROCESS_HUNG_MS` tune detection. The harness auto-strips
-`ELECTRON_RUN_AS_NODE` before launching (set by some Electron-based IDEs/CI runners; left in place it
-makes Electron run as plain Node and reject Chromium flags).
+A scenario is a Playwright spec that drives your app through named **steps**. The step name is the
+join key for the build comparison, so keep names stable across builds. See [tests/](tests/) for the
+demo. The shape:
 
-Write your own scenarios by copying [tests/freeze.demo.spec.ts](tests/freeze.demo.spec.ts) and wrapping
-each interaction in `step('name', () => …)` so freezes get attributed to it.
+```ts
+import { test } from './fixtures';
 
-See [docs/how-it-works.md](docs/how-it-works.md) for the per-layer mechanics, thresholds, and caveats.
+test('checkout flow', async ({ app }) => {
+  const { window: page, step } = app;
+
+  await step('login', async () => {
+    await page.fill('[data-testid=email]', 'user@example.com');
+    await page.click('[data-testid=signin]');
+    await page.waitForSelector('[data-testid=dashboard]');
+  });
+
+  await step('open orders', async () => {
+    await page.click('nav >> text=Orders');
+    await page.waitForSelector('.orders-grid');
+  });
+
+  await step('filter + scroll', async () => {
+    await page.fill('[data-testid=filter]', 'pending');
+    await page.mouse.wheel(0, 4000);
+  });
+});
+```
+
+Each `step()` records its `[start, end]` window; every captured event in that window is attributed to
+the step (and the active route). The same spec runs against both builds — only the launch target
+changes between the old-build run and the new-build run.
+
+---
+
+## What it captures (and how it's traced)
+
+Every layer streams **all** of its signal (not just threshold breaches) to its own file, and ties each
+event to the **app code / service** responsible — the traceability is the point.
+
+| Layer | What it captures | Traced to | Stream |
+|-------|------------------|-----------|--------|
+| **IPC** | every message both directions, transport, byte size, arg types, preview, invoke round-trip latency | the **app call-site** that issued the channel | `ipc.jsonl`, `ipc-callsites.jsonl` |
+| **Storage** | every `localStorage`/`sessionStorage` `set`/`remove`/`clear` + key, size, preview, + a final snapshot | the **call-site** that wrote each key | `storage-ops.jsonl` |
+| **Network** | every request: timing, status, size, type | the CDP **initiator** (call-site) | `network.jsonl` |
+| **Renderer UI** | jank gaps ≥50ms, per route | the route (and the long-task script) | `heartbeat.jsonl` |
+| **Long tasks** | long tasks + LoAF script attribution | `sourceURL` / `functionName` | `renderer-tasks.jsonl` |
+| **Main loop** | event-loop lag + every `ipcMain` handler timing | the **blocking handler** name | `main-loop.jsonl` |
+| **JS errors** | uncaught exceptions / rejections / console errors | the **stack** / top frame | `js-errors.jsonl` |
+| **Memory** | per-process CPU/mem; renderer **JS heap** per route | the process / route | `metrics.jsonl`, `heap.jsonl` |
+| **Host** | host CPU/load/free-mem over the run + box identity | **app-vs-host** CPU attribution (confounder check) | `host.jsonl` |
+| **Routes** | every navigation (the route timeline) | — | `routes.jsonl` |
+| **Breadcrumbs** | the app's own console output | `file:line` of the call | `breadcrumbs.jsonl` |
+| **Subprocess** | `child_process` spawn/exit/hang (cdp+inspect only) | argv + stderr tail | `subprocess.jsonl` |
+| **Freezes** | threshold-crossing freeze events, all layers | the primary layer's cause | `freezes.jsonl` |
+| **Deep** | whole-run CDP trace with V8 CPU samples | — | `trace.json` |
+
+No app cooperation is required for any of this — the harness instruments the platform primitives
+(`ipcMain`/`ipcRenderer`, `Storage.prototype`, CDP Network, `PerformanceObserver`, …) itself.
+
+---
+
+## The reports
+
+**Single-run report** — `runs/<ts>/report.html` (+ `electron-freeze-report-<ts>.md`):
+- A verdict banner + per-step timeline lanes.
+- **Evidence by layer** panels showing the real captured data with call-sites — top IPC channels
+  ("called by"), storage writes ("written by"), slowest network ("started by"), main-loop handler
+  timings, CPU/mem peaks, JS errors, host CPU with app-vs-host split.
+- A freeze drill-down (ranked incidents, "🔎 Start here", "where to look next").
+
+**Comparison report** — `runs/<ts>/compare-report.html` (+ `.md`), written by `npm run compare`:
+- **Scorecard** — the gate: every regressed metric, old → new → Δ vs budget, worst-first.
+- **By route** and **By step** matrices — which screen / which interaction regressed.
+- **Hot-path diff** — a differential flamegraph from the `trace.json` CPU samples: which functions
+  burn more CPU in the new build (red = slower).
+
+**Inline baseline diff** — when `BASELINE_FILE` is set instead, the run's own `report.html` gains a
+lighter *"Build comparison — timing & freeze diff"* section: a per-step table of old → new duration Δ
+plus freeze regressions, and the verdict folds it in. (No per-metric scorecard, route matrix, or
+flamegraph — use `compare` for those.)
+
+---
+
+## The performance gate
+
+The sign-off gates on **Electron client-perf metrics**, each with a budget (allowed regression before
+it trips). Computed per step and per route:
+
+| Metric | Default budget |
+|--------|----------------|
+| Step duration | +20% |
+| UI gap p95 (responsiveness) | +25% |
+| Main-loop lag p95 | +25% |
+| IPC message volume | +30% |
+| Invoke round-trip p95 | +25% |
+| Peak JS heap | +20% |
+
+A metric over budget → **CAUTION**; a **doubled** metric, or a **new-or-worsened freeze that reaches
+≥3s** → **FAIL**. Override all per-metric budgets with `PERF_BUDGET_PCT`. (`BASELINE_TOLERANCE` tunes
+the separate `BASELINE_FILE` in-report diff, *not* these `compare` budgets — whose freeze-worsening
+factor is a fixed `1.2×`.)
+
+Verdict → exit code: **PASS = 0 · CAUTION = 1 · FAIL = 2**.
+
+---
+
+## Command reference
+
+| Command | What it does |
+|---------|--------------|
+| `npm test` | Run the scenario against the target, write a run + report. |
+| `npm run baseline` | Run the scenario and save it as `./build-baseline.json` (the golden build). |
+| `npm run compare -- <oldRun> <newRun> [outDir]` | Diff two run dirs → perf sign-off report + exit code. |
+| `npm run attach -- <binary> [app args]` | Launch a packaged build with debug flags and run the scenario against it. |
+| `npm run signoff` | Run the suite and exit with the verdict code (for CI). |
+| `npm run watch` | Interactive: drive the app by hand, reproduce a freeze, get a report on Ctrl-C. |
+| `npm run selfcheck` | 8 pure logic self-checks (no Electron). |
+| `npm run typecheck` | `tsc --noEmit`. |
+
+---
+
+## Configuration (env vars)
+
+**Target / mode**
+- `LAUNCH_MODE` — `source` (default) or `cdp` (attach).
+- `ELECTRON_APP_PATH` — app to launch in source mode (default `./demo-app`).
+- `ELECTRON_CDP_ENDPOINT` / `ELECTRON_INSPECT_ENDPOINT` — renderer / main endpoints in cdp mode.
+- `CDP_PORT` / `INSPECT_PORT` / `ATTACH_TIMEOUT_MS` — used by `npm run attach`.
+
+**Baseline / gate**
+- `SAVE_BASELINE` — path to write this run's baseline (the `baseline` script sets `./build-baseline.json`).
+- `BASELINE_FILE` — baseline to compare against; embeds the inline diff in the run's report + folds the verdict.
+- `BASELINE_TOLERANCE` — tolerance for the `BASELINE_FILE` inline diff (default `1.2` = +20%). Does **not** affect the `compare` budgets.
+- `PERF_BUDGET_PCT` — override all per-metric budgets in the `compare` gate with one percentage.
+
+**Capture**
+- `CAPTURE_ALL=0` — disable the continuous streams (keep only threshold-based freeze events).
+- `PREVIEW_CHARS` — cap on captured IPC/storage value previews (default `200`).
+- `STREAM_MAX_EVENTS` — per-stream ceiling (default `100000`); excess is dropped + logged.
+- `RECORD_VIDEO=1` — record the renderer (off by default; can jam CDP in headless envs).
+
+**Thresholds** (perception-anchored defaults; rarely need changing): `FREEZE_THRESHOLD_MS` (200),
+`MAIN_LOOP_MAX_MS` (200), `METRICS_INTERVAL_MS` (250), `IPC_STORM_MSGS` (1000), `STALL_MS` (5000),
+`STORAGE_PCT` (0.8), `DISK_LOW_BYTES`, `IO_SLOW_MS` (750), `SUBPROCESS_HUNG_MS` (10000),
+`DEEP_EVIDENCE_MIN_MS` (3000).
+
+---
+
+## Run artifacts
+
+Each `runs/<timestamp>/` contains:
+
+```text
+report.html / electron-freeze-report-*.md   single-run evidence report
+compare-report.html / .md                    build comparison (when compare runs)
+result.json / compare-result.json            { verdict, exitCode } for CI
+meta.json                                     run + build identity + host info
+
+# evidence streams (one per layer)
+ipc.jsonl  ipc-callsites.jsonl               every IPC message + app call-sites
+storage.jsonl  storage-ops.jsonl             quota/disk + localStorage/sessionStorage writes
+network.jsonl  heartbeat.jsonl  main-loop.jsonl
+metrics.jsonl  heap.jsonl  host.jsonl        per-process + JS heap + host metrics
+routes.jsonl  breadcrumbs.jsonl  js-errors.jsonl
+renderer-tasks.jsonl  subprocess.jsonl  freezes.jsonl  actions.jsonl
+trace.json                                   CDP trace w/ CPU samples (feeds the flamegraph)
+```
+
+`runs/` is git-ignored. Open the `.html` reports in a browser; load `trace.json` in
+`chrome://tracing`, Perfetto, or DevTools → Performance for the raw call stacks.
+
+---
+
+## CI integration
+
+`npm run signoff` runs the suite and exits with the verdict code. Gate a release with the baseline:
+
+```bash
+# nightly: refresh the golden baseline from the last shipped build
+npm run baseline
+
+# per-PR: build the candidate, run against the baseline, fail on regression
+BASELINE_FILE=./build-baseline.json npm run signoff
+# exit 0 PASS · 1 CAUTION · 2 FAIL
+```
+
+Or run `compare` between two explicit build runs and key CI off `compare-result.json`.
+
+---
+
+## Limits & caveats
+
+- **IPC app call-site needs a reachable `ipcRenderer`.** The renderer-side tap captures the call-site
+  only when `ipcRenderer` is reachable in the page world (`nodeIntegration`, or an exposed
+  `window.require`). A hardened **`contextIsolation`** app hides it — you still get every IPC message
+  via the main-process tap (with `--inspect`), just without the renderer call-site. Storage call-sites
+  are unaffected (they use a main-world API).
+- **Attach needs the debug flags.** A packaged build must be launched with `--remote-debugging-port`
+  and `--inspect`; production builds that disable the Node inspector can't be attached. `attach.ts`
+  fails loudly with guidance if an endpoint never comes up.
+- **The differential flamegraph is best on a real app.** On the near-idle demo it's dominated by the
+  measurement apparatus (Playwright/our probes), which is filtered out — leaving little signal. On a
+  real app under a real version bump, app frames dominate.
+- **Per-route breakdown needs a multi-route app.** A single-page app collapses to one route row;
+  the route dimension pays off on apps with multiple screens.
+- **Streams are capped.** `STREAM_MAX_EVENTS` bounds each file; overflow is dropped and logged (never
+  silently truncated). Raise it for a deep-capture run.
+
+---
+
+## How it works
+
+The harness wires a `Monitor` of per-layer detectors over a Playwright `Page` (+ a `MainBridge` into
+the Electron main process in source / inspect mode). Each detector instruments a platform primitive,
+streams its evidence to a JSONL file, and emits threshold-crossing events onto a shared bus. At
+teardown the reporter reduces the streams to per-step / per-route metrics, correlates events to steps
+and call-sites, computes the verdict, and renders the reports. The build comparison
+([src/compare.ts](src/compare.ts)) diffs two runs' reduced metrics against budgets; the flamegraph
+([src/flamegraph.ts](src/flamegraph.ts)) folds and diffs the `trace.json` CPU samples. See
+[docs/how-it-works.md](docs/how-it-works.md) for the deeper tour.
