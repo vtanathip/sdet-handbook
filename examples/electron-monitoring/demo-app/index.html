@@ -83,6 +83,10 @@
         },
         'stall-fetch': () => { console.log('[api] GET /reports/quarterly — awaiting response…'); window.freeze.stallFetch(); },
         'storage-fill': async () => {
+          // localStorage writes — exercise the storage-ops tracker (captured with this call-site).
+          localStorage.setItem('em:lastReport', JSON.stringify({ id: 4821, ts: Date.now() }));
+          localStorage.setItem('em:prefs', JSON.stringify({ theme: 'dark', density: 'compact' }));
+          sessionStorage.setItem('em:csrf', 'tok-' + Math.random().toString(36).slice(2));
           // Cache API counts toward navigator.storage.estimate() (localStorage does not).
           try { const c = await caches.open('em-fill'); await c.put('/em-big', new Response('x'.repeat(4 * 1024 * 1024))); }
           catch (e) { log('storage: ' + e.message); }

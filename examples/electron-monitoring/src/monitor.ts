@@ -10,6 +10,8 @@ import { JsErrors } from './detectors/jsErrors.js';
 import { Breadcrumbs } from './detectors/breadcrumbs.js';
 import { StallWatch } from './detectors/stallWatch.js';
 import { StorageDisk } from './detectors/storageDisk.js';
+import { PerfSamples } from './detectors/perfSamples.js';
+import { HostMetrics } from './detectors/hostMetrics.js';
 import { MainLoopLag } from './detectors/mainLoopLag.js';
 import { AppMetrics } from './detectors/appMetrics.js';
 import { NativeSignals } from './detectors/nativeSignals.js';
@@ -39,9 +41,11 @@ export class Monitor {
     };
     // Renderer + deep layers work over any channel; main-process layers need a MainBridge
     // (Playwright in source mode, or a Node inspector attach in cdp+inspect mode).
-    this.detectors.push(new RendererHeartbeat(ctx), new RendererTasks(ctx), new JsErrors(ctx), new Breadcrumbs(ctx), new StallWatch(ctx), new StorageDisk(ctx), new DeepEvidence(ctx));
+    // IpcFlood works over either channel: the main-process tap (with a bridge) or a renderer-side
+    // ipcRenderer fallback (plain cdp, no --inspect), so it lives in the always-on set.
+    this.detectors.push(new RendererHeartbeat(ctx), new RendererTasks(ctx), new JsErrors(ctx), new Breadcrumbs(ctx), new StallWatch(ctx), new StorageDisk(ctx), new PerfSamples(ctx), new HostMetrics(ctx), new IpcFlood(ctx), new DeepEvidence(ctx));
     if (opts.mainBridge) {
-      this.detectors.push(new MainLoopLag(ctx), new AppMetrics(ctx), new NativeSignals(ctx), new IpcFlood(ctx), new Subprocess(ctx));
+      this.detectors.push(new MainLoopLag(ctx), new AppMetrics(ctx), new NativeSignals(ctx), new Subprocess(ctx));
     } else {
       log('warn', 'no main-process channel: layers main-loop, hardware, native are unavailable (plain cdp without --inspect)');
     }

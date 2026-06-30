@@ -22,6 +22,7 @@ export default function globalTeardown(): void {
     loafSupported: (m.loafSupported as boolean) ?? false,
     mainLayers: (m.mainLayers as boolean) ?? false,
     hostUptimeSec: m.hostUptimeSec as number | undefined,
+    appVersion: m.appVersion as string | undefined,
   });
 
   writeFileSync(join(dir, 'result.json'), JSON.stringify({ verdict: result.verdict, exitCode: result.exitCode }, null, 2));

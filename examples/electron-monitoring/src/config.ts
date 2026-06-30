@@ -28,6 +28,15 @@ const ConfigSchema = z.object({
   deepEvidenceMinMs: z.number().default(3000),
   // recordVideo can jam Electron's CDP pipe in headless/displayless environments — opt-in.
   recordVideo: z.boolean().default(false),
+  // ── Full-capture (monitoring) mode ──────────────────────────────────────────────────────────────
+  // This harness is a build-vs-build tracer, not just a freeze gate: each layer streams ALL of its
+  // signal (every IPC message, every gap, every request) to its own jsonl, not only threshold breaches.
+  // The threshold-based freeze emit still happens on top — these only control the continuous streams.
+  captureAll: z.boolean().default(true),
+  // Truncation/size ceilings for the streams. previewChars bounds a captured IPC/console payload
+  // preview; streamMaxEvents caps any single stream file (we log + count drops past it, never silent).
+  previewChars: z.number().default(200),
+  streamMaxEvents: z.number().default(100_000),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -57,5 +66,8 @@ export function loadConfig(): Config {
     ioSlowMs: num('IO_SLOW_MS'),
     subprocessHungMs: num('SUBPROCESS_HUNG_MS'),
     recordVideo: process.env.RECORD_VIDEO === '1' ? true : undefined,
+    captureAll: process.env.CAPTURE_ALL === '0' ? false : undefined,
+    previewChars: num('PREVIEW_CHARS'),
+    streamMaxEvents: num('STREAM_MAX_EVENTS'),
   });
 }

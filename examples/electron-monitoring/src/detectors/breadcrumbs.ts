@@ -17,12 +17,15 @@ export class Breadcrumbs implements Detector {
   }
 
   async start(): Promise<void> {
+    const cap = Math.max(500, this.ctx.config.previewChars * 4); // raise the cap in full-capture mode
     this.ctx.page.on('console', (msg) => {
+      const loc = msg.location(); // file:line:col of the console.* call — free, was dropped before
       void this.out.append({
         ts: new Date().toISOString(),
         where: 'renderer',
         level: msg.type(),
-        text: msg.text().slice(0, 500), // ponytail: cap line length; full text is in trace/devtools
+        text: msg.text().slice(0, cap),
+        at: loc?.url ? `${loc.url}:${loc.lineNumber ?? 0}:${loc.columnNumber ?? 0}` : undefined,
       });
     });
   }

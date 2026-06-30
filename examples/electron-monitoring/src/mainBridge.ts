@@ -33,6 +33,14 @@ export interface ChildEvt {
 export interface LiveChild { pid: number; cmd: string; ageMs: number }
 /** One timed ipcMain handler invocation, so L3 can name the handler that blocked the loop. */
 export interface IpcTiming { channel: string; kind: 'on' | 'handle'; durationMs: number; ts: number }
+/** One captured IPC message (both directions). transport: send | sendSync | invoke | invoke-reply.
+ *  dir: 'r2m' renderer→main, 'm2r' main→renderer. preview/bytes/argTypes are shapes-only (no full
+ *  payload bodies). latencyMs is set on invoke-reply records (request→reply round-trip). */
+export interface IpcMessage {
+  t: number; transport: string; channel: string; dir: 'r2m' | 'm2r';
+  bytes: number; argTypes: string[]; preview: string; latencyMs?: number; error?: boolean;
+  at?: string; // app call-site that issued it (renderer tap only; main tap can't see the renderer stack)
+}
 
 export interface MainBridge {
   startEventLoopMonitor(): Promise<void>;
@@ -41,10 +49,12 @@ export interface MainBridge {
   getAppMetrics(): Promise<ProcSample[]>;
   wireNativeListeners(): Promise<void>;
   drainNative(): Promise<NativeEvt[]>;
-  /** Patch ipcMain.emit + ipcMain.handle to count renderer→main traffic PER CHANNEL (send + invoke). */
-  startIpcCounter(): Promise<void>;
-  /** Per-channel counts since the last read, keyed `send:<ch>` / `invoke:<ch>`, then reset. */
-  readIpcCounts(): Promise<Record<string, number>>;
+  /** Tap EVERY IPC message both directions: renderer→main (send/sendSync/invoke) via ipcMain, and
+   *  main→renderer (webContents.send) per window. Captures shapes+previews (no full bodies) and
+   *  invoke round-trip latency. `previewChars` bounds each captured preview. */
+  startIpcTap(previewChars: number): Promise<void>;
+  /** Drained captured messages since the last read + how many were dropped past the ring cap. */
+  drainIpcTap(): Promise<{ events: IpcMessage[]; dropped: number }>;
   /** Wrap every ipcMain.on/handle handler to time each invocation (names the loop-blocking handler). */
   startIpcHandlerTimer(): Promise<void>;
   /** Drained per-invocation timings since the last read, then reset. */
@@ -54,6 +64,8 @@ export interface MainBridge {
   drainMainErrors(): Promise<JsErr[]>;
   /** The app's userData directory (so the harness can check disk free / I/O latency on that volume). */
   getUserDataPath(): Promise<string>;
+  /** Build identity (app name + version) — names WHICH build a run/comparison is. */
+  getAppInfo(): Promise<{ name: string; version: string }>;
   /** Patch child_process to track spawned children. Returns false when unsupported (source mode has
    *  no `require` in the eval scope — only the inspector channel can do this). */
   wireChildProcs(): Promise<boolean>;
@@ -94,14 +106,29 @@ function probes(E: string) {
       `e.app.on('render-process-gone',function(_e,wc,d){var o={kind:'render-process-gone',t:Date.now(),details:d};try{o.wcId=wc.id;o.url=wc.getURL();o.title=wc.getTitle();o.wcType=wc.getType();}catch(_){}g.__native.push(o);});` +
       `e.app.on('child-process-gone',function(_e,d){g.__native.push({kind:'child-process-gone',t:Date.now(),details:d});});return 0;})()`,
     drainNative: `(function(){var g=globalThis;var e=g.__native||[];g.__native=[];return e;})()`,
-    // L7: count PER CHANNEL (so the report names the flooding channel) and also wrap ipcMain.handle so
-    // invoke traffic is counted (it bypasses emit). Keys are namespaced by transport.
-    startIpc:
-      `(function(){var i=${E}.ipcMain;var g=globalThis;if(g.__ipcWrapped)return 0;g.__ipcWrapped=true;g.__ipc={};` +
-      `var bump=function(k){g.__ipc[k]=(g.__ipc[k]||0)+1;};` +
-      `var orig=i.emit.bind(i);i.emit=function(ch){if(typeof ch==='string')bump('send:'+ch);return orig.apply(i,arguments);};` +
-      `var oh=i.handle.bind(i);i.handle=function(ch,fn){return oh(ch,function(){bump('invoke:'+ch);return fn.apply(this,arguments);});};return 0;})()`,
-    readIpc: `(function(){var g=globalThis;var c=g.__ipc||{};g.__ipc={};return c;})()`,
+    // L7: tap EVERY IPC message both directions (shapes+previews only — no full bodies). renderer→main
+    // send/sendSync (ipcMain.emit) + invoke (ipcMain.handle, with round-trip latency on the reply), and
+    // main→renderer (webContents.send) wrapped per window. A ring cap bounds memory; drops are counted.
+    ipcTapStart: (cap: number): string =>
+      `(function(){var e=${E};var i=e.ipcMain;var g=globalThis;if(g.__ipctapWired)return 0;g.__ipctapWired=true;` +
+      `g.__ipctap=g.__ipctap||[];g.__ipctapDrop=0;var CAP=${cap};var MAX=200000;` +
+      // shape(args,from): typeof each arg, total byte size (JSON length best-effort), truncated preview.
+      `var shape=function(args,from){var types=[],bytes=0,parts=[],used=0;for(var k=from;k<args.length;k++){var a=args[k];types.push(typeof a);var s;try{s=(typeof a==='string')?a:JSON.stringify(a);}catch(_){s=String(a);}if(s==null)s=String(a);bytes+=s.length;if(used<CAP){parts.push(s.slice(0,CAP));used+=s.length;}}return{bytes:bytes,argTypes:types,preview:parts.join(' | ').slice(0,CAP)};};` +
+      `var rec=function(transport,channel,dir,args,from,extra){if(g.__ipctap.length>=MAX){g.__ipctapDrop++;return;}var sh=shape(args,from);var o={t:Date.now(),transport:transport,channel:channel,dir:dir,bytes:sh.bytes,argTypes:sh.argTypes,preview:sh.preview};if(extra)for(var kk in extra)o[kk]=extra[kk];g.__ipctap.push(o);};` +
+      // renderer→main send/sendSync via ipcMain.emit; args = (channel, IpcMainEvent, ...payload).
+      `var oe=i.emit.bind(i);i.emit=function(ch){if(typeof ch==='string'){var ev=arguments[1];var sync=ev&&typeof ev==='object'&&('returnValue' in ev);rec(sync?'sendSync':'send',ch,'r2m',arguments,2);}return oe.apply(i,arguments);};` +
+      // renderer→main invoke via ipcMain.handle; capture args + reply round-trip latency.
+      `var oh=i.handle.bind(i);i.handle=function(ch,fn){return oh(ch,function(){var t0=Date.now();rec('invoke',ch,'r2m',arguments,1);var r=fn.apply(this,arguments);` +
+      `if(r&&typeof r.then==='function'){return r.then(function(v){rec('invoke-reply',ch,'m2r',[v],0,{latencyMs:Date.now()-t0});return v;},function(er){rec('invoke-reply',ch,'m2r',[String((er&&er.message)||er)],0,{latencyMs:Date.now()-t0,error:true});throw er;});}` +
+      `rec('invoke-reply',ch,'m2r',[r],0,{latencyMs:Date.now()-t0});return r;});};` +
+      // invoke handlers registered BEFORE we wrapped (the demo registers all at startup) bypass the
+      // wrapper — re-register them through it so their invokes are captured too.
+      `var H=i._invokeHandlers;if(H&&H.forEach){var re=[];H.forEach(function(fn,ch){re.push([ch,fn]);});re.forEach(function(p){if(i.removeHandler)i.removeHandler(p[0]);i.handle(p[0],p[1]);});}` +
+      // main→renderer via webContents.send — wrap per instance (the class isn't exported); cover
+      // existing windows + any created later, the same way native listeners are wired.
+      `var wrapSend=function(c){if(!c||c.__sendTapped)return;c.__sendTapped=true;var os=c.send.bind(c);c.send=function(ch){if(typeof ch==='string')rec('send',ch,'m2r',arguments,1);return os.apply(c,arguments);};};` +
+      `try{e.webContents.getAllWebContents().forEach(wrapSend);}catch(_){}e.app.on('web-contents-created',function(_e,c){wrapSend(c);});return 0;})()`,
+    ipcTapDrain: `(function(){var g=globalThis;var e=g.__ipctap||[];g.__ipctap=[];var d=g.__ipctapDrop||0;g.__ipctapDrop=0;return{events:e,dropped:d};})()`,
     // L3: time every ipcMain handler invocation so the loop-blocking handler is named. Wraps on/once/
     // addListener + handle for future registrations AND re-wraps handlers already registered before we
     // attached (the demo registers all of them at startup). Bare Date.now() pair per call — cheap.
@@ -123,6 +150,7 @@ function probes(E: string) {
       `process.on('unhandledRejection',function(r){g.__jserr.push({kind:'main-unhandledRejection',message:String((r&&r.message)||r),stack:String((r&&r.stack)||'')});});return 0;})()`,
     mainErrDrain: `(function(){var g=globalThis;var e=g.__jserr||[];g.__jserr=[];return e;})()`,
     userData: `${E}.app.getPath('userData')`,
+    appInfo: `(function(){var a=${E}.app;return {name:a.getName(),version:a.getVersion()};})()`,
   };
 }
 
@@ -144,13 +172,14 @@ export class ElectronAppBridge implements MainBridge {
   getAppMetrics(): Promise<ProcSample[]> { return this.run<ProcSample[]>(this.p.metrics); }
   wireNativeListeners(): Promise<void> { return this.run<number>(this.p.wireNative).then(() => {}); }
   drainNative(): Promise<NativeEvt[]> { return this.run<NativeEvt[]>(this.p.drainNative); }
-  startIpcCounter(): Promise<void> { return this.run<number>(this.p.startIpc).then(() => {}); }
-  readIpcCounts(): Promise<Record<string, number>> { return this.run<Record<string, number>>(this.p.readIpc); }
+  startIpcTap(previewChars: number): Promise<void> { return this.run<number>(this.p.ipcTapStart(previewChars)).then(() => {}); }
+  drainIpcTap(): Promise<{ events: IpcMessage[]; dropped: number }> { return this.run<{ events: IpcMessage[]; dropped: number }>(this.p.ipcTapDrain); }
   startIpcHandlerTimer(): Promise<void> { return this.run<number>(this.p.startTimer).then(() => {}); }
   drainIpcHandlerTimings(): Promise<IpcTiming[]> { return this.run<IpcTiming[]>(this.p.drainTimings); }
   wireMainErrors(): Promise<void> { return this.run<number>(this.p.mainErrWire).then(() => {}); }
   drainMainErrors(): Promise<JsErr[]> { return this.run<JsErr[]>(this.p.mainErrDrain); }
   getUserDataPath(): Promise<string> { return this.run<string>(this.p.userData); }
+  getAppInfo(): Promise<{ name: string; version: string }> { return this.run<{ name: string; version: string }>(this.p.appInfo); }
   // child_process patching needs `require`, which isn't in scope for electronApp.evaluate — unsupported.
   async wireChildProcs(): Promise<boolean> { return false; }
   async drainChildProcs(): Promise<ChildEvt[]> { return []; }
@@ -169,13 +198,14 @@ export class InspectorBridge implements MainBridge {
   getAppMetrics(): Promise<ProcSample[]> { return this.insp.evaluate<ProcSample[]>(this.p.metrics); }
   wireNativeListeners(): Promise<void> { return this.insp.evaluate<number>(this.p.wireNative).then(() => {}); }
   drainNative(): Promise<NativeEvt[]> { return this.insp.evaluate<NativeEvt[]>(this.p.drainNative); }
-  startIpcCounter(): Promise<void> { return this.insp.evaluate<number>(this.p.startIpc).then(() => {}); }
-  readIpcCounts(): Promise<Record<string, number>> { return this.insp.evaluate<Record<string, number>>(this.p.readIpc); }
+  startIpcTap(previewChars: number): Promise<void> { return this.insp.evaluate<number>(this.p.ipcTapStart(previewChars)).then(() => {}); }
+  drainIpcTap(): Promise<{ events: IpcMessage[]; dropped: number }> { return this.insp.evaluate<{ events: IpcMessage[]; dropped: number }>(this.p.ipcTapDrain); }
   startIpcHandlerTimer(): Promise<void> { return this.insp.evaluate<number>(this.p.startTimer).then(() => {}); }
   drainIpcHandlerTimings(): Promise<IpcTiming[]> { return this.insp.evaluate<IpcTiming[]>(this.p.drainTimings); }
   wireMainErrors(): Promise<void> { return this.insp.evaluate<number>(this.p.mainErrWire).then(() => {}); }
   drainMainErrors(): Promise<JsErr[]> { return this.insp.evaluate<JsErr[]>(this.p.mainErrDrain); }
   getUserDataPath(): Promise<string> { return this.insp.evaluate<string>(this.p.userData); }
+  getAppInfo(): Promise<{ name: string; version: string }> { return this.insp.evaluate<{ name: string; version: string }>(this.p.appInfo); }
   async wireChildProcs(): Promise<boolean> {
     return (await this.insp.evaluate<boolean>(
       `(function(){var cp=require('child_process');var g=globalThis;if(g.__cpWired)return true;g.__cpWired=true;g.__cpEvents=[];g.__cpLive={};var seq=0;` +

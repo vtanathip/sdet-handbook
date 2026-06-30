@@ -88,8 +88,11 @@ export const test = base.extend<{ app: Harness }>({
     const loafSupported = (await window
       .evaluate(() => (globalThis as unknown as { __loafSupported?: boolean }).__loafSupported ?? false)
       .catch(() => false)) as boolean;
+    // Build identity (name + version) so the report and any build comparison name WHICH build this is.
+    const appInfo = mainBridge ? await mainBridge.getAppInfo().catch(() => undefined) : undefined;
     writeMeta(runDir, {
-      appLabel: cfg.launchMode === 'cdp' ? cfg.cdpEndpoint! : cfg.appPath,
+      appLabel: appInfo?.name ?? (cfg.launchMode === 'cdp' ? cfg.cdpEndpoint! : cfg.appPath),
+      appVersion: appInfo?.version,
       launchMode: cfg.launchMode,
       mainLayers: !!mainBridge,
       loafSupported,
