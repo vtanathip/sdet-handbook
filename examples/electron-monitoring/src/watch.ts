@@ -82,8 +82,10 @@ async function main(): Promise<void> {
   const loafSupported = (await page
     .evaluate(() => (globalThis as unknown as { __loafSupported?: boolean }).__loafSupported ?? false)
     .catch(() => false)) as boolean;
+  const appInfo = mainBridge ? await mainBridge.getAppInfo().catch(() => undefined) : undefined;
   writeMeta(runDir, {
-    appLabel: cfg.launchMode === 'cdp' ? cfg.cdpEndpoint! : cfg.appPath,
+    appLabel: appInfo?.name ?? (cfg.launchMode === 'cdp' ? cfg.cdpEndpoint! : cfg.appPath),
+    appVersion: appInfo?.version,
     launchMode: cfg.launchMode, mainLayers: !!mainBridge, loafSupported,
   });
 
@@ -132,6 +134,7 @@ async function main(): Promise<void> {
       thresholdMs: cfg.heartbeatMs,
       loafSupported: (m.loafSupported as boolean) ?? false,
       mainLayers: (m.mainLayers as boolean) ?? false,
+      appVersion: m.appVersion as string | undefined,
     });
     console.log(`\nVerdict: ${r.verdict}`);
     console.log(`Report:  ${r.mdPath}`);

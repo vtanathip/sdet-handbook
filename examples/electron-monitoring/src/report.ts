@@ -4,6 +4,8 @@ import { severityFor, type FreezeEvent, type FreezeLayer, type Severity } from '
 import type { ActionWindow } from './currentAction.js';
 import { correlate } from './correlator.js';
 import { resolveLoc } from './util/sourcemap.js';
+import { readRunSteps, diffStepSets, summarizeRun, diffSectionHtml, renderDiffMarkdown, type RunDiff, type RunSummary, type StepMetrics } from './compare.js';
+import { readEvidenceSummary, fmtKB, type EvidenceSummary } from './evidence.js';
 
 // Reads the JSONL evidence streams a run produced, merges overlapping detector events into
 // freeze "incidents", attributes each to a UI action, computes the verdict + exit code
@@ -28,6 +30,7 @@ export interface ReportMeta {
   appLabel: string; launchMode: string; thresholdMs: number; loafSupported: boolean;
   mainLayers: boolean;
   hostUptimeSec?: number; // seconds since the host last booted — run context, never gated on
+  appVersion?: string;    // the build's version (from app.getVersion()) — names which build this run is
 }
 
 // ponytail: 14d — long enough that environmental degradation is plausible; bump if your CI reboots
@@ -523,6 +526,209 @@ function renderLayerReports(runDir: string, events: FreezeEvent[]): FreezeLayer[
   return written;
 }
 
+// ── Per-step trace + rich evidence (Markdown) ───────────────────────────────────────────────────────
+// "What the app did" — per scenario step: duration + responsiveness + IPC volume + freeze.
+function renderPerStepMarkdown(steps: StepMetrics[]): string {
+  if (steps.length === 0) return '';
+  const L: string[] = ['## What the app did — per step', ''];
+  L.push('| Step | Duration | Worst UI gap | Worst main lag | IPC msgs | Invoke p95 | Froze |',
+         '|------|----------|--------------|----------------|----------|-----------|-------|');
+  for (const s of steps) {
+    L.push(`| ${esc(s.name)} | ${fmtSec(s.durationMs)} | ${s.worstUiGapMs || '—'}${s.worstUiGapMs ? 'ms' : ''} | ${s.worstMainLagMs || '—'}${s.worstMainLagMs ? 'ms' : ''} | ${s.ipcMsgs} | ${s.ipcReplyP95Ms || '—'}${s.ipcReplyP95Ms ? 'ms' : ''} | ${s.froze ? `${fmtS1(s.worstFreezeMs)} [${s.freezeLayers.join(', ')}]` : '—'} |`);
+  }
+  L.push('');
+  return L.join('\n');
+}
+
+function renderEvidenceMarkdown(ev: EvidenceSummary): string {
+  const L: string[] = ['## Evidence by layer', '',
+    'The actual data each layer captured — summaries + real sample records. Full unfiltered streams are linked under Artifacts.', ''];
+
+  // IPC
+  L.push(`### 🔌 IPC — ${ev.ipc.total.toLocaleString()} messages (${ev.ipc.r2m.toLocaleString()} renderer→main, ${ev.ipc.m2r.toLocaleString()} main→renderer, ${fmtKB(ev.ipc.bytes)})`, '');
+  if (ev.ipc.total > 0) {
+    L.push(`By transport: ${Object.entries(ev.ipc.byTransport).map(([k, v]) => `${k} ${v.toLocaleString()}`).join(' · ')}`, '');
+    if (ev.ipc.channels.length) {
+      L.push('| Channel | Transport | Dir | Count | Bytes | Max latency | Called by (app call-site) |', '|---|---|---|---|---|---|---|');
+      for (const c of ev.ipc.channels) L.push(`| ${esc(c.channel)} | ${c.transport} | ${c.dir} | ${c.count.toLocaleString()} | ${fmtKB(c.bytes)} | ${c.maxLatencyMs != null ? c.maxLatencyMs + 'ms' : '—'} | ${esc(c.at ?? '') || '—'} |`);
+      L.push('');
+    }
+    if (ev.ipc.slowestInvokes.length) L.push(`**Slowest invokes:** ${ev.ipc.slowestInvokes.map((i) => `\`${i.channel}\` ${i.latencyMs}ms`).join(' · ')}`, '');
+    if (ev.ipc.samples.length) {
+      L.push('Sample messages:', '', '| Transport | Channel | Dir | Size | Preview |', '|---|---|---|---|---|');
+      for (const s of ev.ipc.samples) L.push(`| ${s.transport} | ${esc(s.channel)} | ${s.dir} | ${s.size} | ${esc(s.preview) || '—'} |`);
+      L.push('');
+    }
+  }
+
+  // Network
+  L.push(`### 🌐 Network — ${ev.network.total} request(s), ${ev.network.failed} failed`, '');
+  if (ev.network.slowest.length) {
+    L.push('| URL | Status | Time | Size | Started by |', '|---|---|---|---|---|');
+    for (const r of ev.network.slowest) L.push(`| ${esc(r.url.slice(0, 70))} | ${r.status ?? 'FAILED'} | ${r.ms}ms | ${r.size} | ${esc((r.initiator ?? '').slice(0, 40)) || '—'} |`);
+    L.push('');
+  }
+
+  // Main loop
+  L.push(`### ⚙️ Main process — event-loop lag p50 ${ev.mainLoop.lagP50}ms · p95 ${ev.mainLoop.lagP95}ms · max ${ev.mainLoop.lagMax}ms`, '');
+  if (ev.mainLoop.handlers.length) {
+    L.push('IPC handler timings:', '', '| Handler | Calls | Max | Total |', '|---|---|---|---|');
+    for (const h of ev.mainLoop.handlers) L.push(`| ${esc(h.label)} | ${h.calls} | ${h.maxMs}ms | ${h.totalMs}ms |`);
+    L.push('');
+  }
+
+  // CPU / memory
+  if (ev.cpuMem.processes.length) {
+    L.push('### 🧠 CPU / memory — peak per process', '', '| Process | Peak CPU | Peak memory |', '|---|---|---|');
+    for (const p of ev.cpuMem.processes) L.push(`| ${esc(p.name)} | ${p.peakCpu}% | ${p.peakMemMB} MB |`);
+    L.push('');
+  }
+
+  // Errors
+  if (ev.errors.length) {
+    L.push(`### 🐛 JS errors — ${ev.errors.length}`, '');
+    for (const e of ev.errors) L.push(`- **${e.kind}** [${e.where}] ${esc(e.message)}${e.at ? ` — \`${esc(e.at)}\`` : ''}`);
+    L.push('');
+  }
+
+  // Heartbeat
+  if (ev.heartbeat.jankCount > 0) {
+    L.push(`### 🫀 Renderer UI gaps — ${ev.heartbeat.jankCount} jank event(s), worst ${ev.heartbeat.worstMs}ms`, '');
+    for (const r of ev.heartbeat.routes) L.push(`- ${esc(r.route)} — ${r.count} gap(s), worst ${r.worstMs}ms`);
+    L.push('');
+  }
+
+  // Storage writes — traced to the app call-site that wrote each key.
+  if (ev.storageOps.total > 0 || ev.storageOps.snapshotKeys > 0) {
+    L.push(`### 💾 Storage writes — ${ev.storageOps.total} op(s): ${ev.storageOps.sets} set · ${ev.storageOps.removes} remove · ${ev.storageOps.clears} clear (left ${ev.storageOps.snapshotKeys} keys, ${fmtMB(ev.storageOps.snapshotBytes / 1024)})`, '');
+    if (ev.storageOps.byKey.length) {
+      L.push('| Key | Area | Writes | Bytes | Written by (call-site) |', '|---|---|---|---|---|');
+      for (const k of ev.storageOps.byKey) L.push(`| ${esc(k.key)} | ${k.area} | ${k.writes} | ${k.bytes} | ${esc(k.at) || '—'} |`);
+      L.push('');
+    }
+  }
+
+  // Host — with app-vs-host CPU attribution.
+  if (ev.host) {
+    const h = ev.host;
+    L.push(`### 🖥️ Host — ${esc(h.cpuModel ?? 'unknown CPU')}${h.cores ? ` (${h.cores} cores)` : ''}${h.platform ? `, ${h.platform}` : ''}`, '');
+    L.push(`- **Host CPU:** peak ${h.hostCpuPeak}% · avg ${h.hostCpuAvg}% — **of which the app's own processes peaked ${h.appCpuPeak}%** (${h.appCpuPeak >= h.hostCpuPeak * 0.6 ? 'load is mostly the app' : 'much of the load is external — results may be confounded'})`);
+    L.push(`- **Free memory low-water:** ${h.freeMemLowMB} MB · **peak load avg:** ${h.loadPeak}`, '');
+  }
+
+  // Stream inventory (links to full data)
+  if (ev.counts.length) {
+    L.push('### 📂 Full streams', '', '| Stream | Records | What |', '|---|---|---|');
+    for (const c of ev.counts) L.push(`| \`${c.file}\` | ${c.count.toLocaleString()} | ${c.what} |`);
+    L.push('');
+  }
+  return L.join('\n');
+}
+
+// ── Dashboard: per-step lanes + evidence panels (HTML) ──────────────────────────────────────────────
+const tbl = (head: string[], rows: string[][]): string =>
+  `<table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+
+function renderEvidenceHtml(steps: StepMetrics[], ev: EvidenceSummary): string {
+  const P: string[] = [];
+
+  // Per-step lanes — the headline visual: each scenario step as a duration bar with what happened.
+  if (steps.length) {
+    const max = Math.max(...steps.map((s) => s.durationMs), 1);
+    const lanes = steps.map((s) => {
+      const w = Math.max(3, Math.round((s.durationMs / max) * 100));
+      const cls = s.froze ? (s.worstFreezeMs >= 3000 ? 'sev-severe' : 'sev-moderate') : 'sev-ok';
+      const chips = [
+        s.ipcMsgs ? `<span class="dchip">${s.ipcMsgs.toLocaleString()} IPC</span>` : '',
+        s.worstMainLagMs ? `<span class="dchip">lag ${s.worstMainLagMs}ms</span>` : '',
+        s.worstUiGapMs ? `<span class="dchip">UI gap ${s.worstUiGapMs}ms</span>` : '',
+        s.ipcReplyP95Ms ? `<span class="dchip">invoke p95 ${s.ipcReplyP95Ms}ms</span>` : '',
+        s.froze ? `<span class="dchip froze">froze ${fmtS1(s.worstFreezeMs)}</span>` : '',
+      ].filter(Boolean).join('');
+      return `<div class="lane"><span class="lane-name" title="${esc(s.name)}">${esc(s.name)}</span>
+        <span class="lane-track"><span class="lane-fill ${cls}" style="width:${w}%"></span></span>
+        <span class="lane-dur">${fmtSec(s.durationMs)}</span><span class="lane-chips">${chips}</span></div>`;
+    }).join('');
+    P.push(`<h2>What the app did — per step</h2><div class="lanes">${lanes}</div>`);
+  }
+
+  // Evidence panels grid.
+  const panels: string[] = [];
+
+  // IPC
+  if (ev.ipc.total > 0) {
+    const chanRows = ev.ipc.channels.map((c) => [esc(c.channel), c.transport, c.dir, c.count.toLocaleString(), fmtKB(c.bytes), c.maxLatencyMs != null ? c.maxLatencyMs + 'ms' : '—', c.at ? `<code>${esc(c.at)}</code>` : '—']);
+    const sampleRows = ev.ipc.samples.map((s) => [s.transport, esc(s.channel), s.dir, s.size, `<code>${esc(s.preview) || '—'}</code>`]);
+    panels.push(`<div class="panel"><h3>🔌 IPC <span class="big">${ev.ipc.total.toLocaleString()}</span> messages</h3>
+      <p class="sub">${ev.ipc.r2m.toLocaleString()} renderer→main · ${ev.ipc.m2r.toLocaleString()} main→renderer · ${fmtKB(ev.ipc.bytes)} · ${Object.entries(ev.ipc.byTransport).map(([k, v]) => `${k} ${v.toLocaleString()}`).join(', ')}</p>
+      ${ev.ipc.slowestInvokes.length ? `<p class="sub">Slowest invokes: ${ev.ipc.slowestInvokes.map((i) => `<code>${esc(i.channel)}</code> ${i.latencyMs}ms`).join(' · ')}</p>` : ''}
+      <h4>Top channels — called by</h4>${tbl(['Channel', 'Transport', 'Dir', 'Count', 'Bytes', 'Max latency', 'Called by'], chanRows)}
+      ${sampleRows.length ? `<h4>Sample messages</h4>${tbl(['Transport', 'Channel', 'Dir', 'Size', 'Preview'], sampleRows)}` : ''}</div>`);
+  }
+
+  // Network
+  if (ev.network.total > 0) {
+    panels.push(`<div class="panel"><h3>🌐 Network <span class="big">${ev.network.total}</span> requests</h3>
+      <p class="sub">${ev.network.failed} failed</p>
+      ${tbl(['URL', 'Status', 'Time', 'Size', 'Started by'], ev.network.slowest.map((r) => [esc(r.url.slice(0, 60)), String(r.status ?? 'FAILED'), r.ms + 'ms', r.size, esc((r.initiator ?? '').slice(0, 36)) || '—']))}</div>`);
+  }
+
+  // Main loop
+  if (ev.mainLoop.lagSamples > 0 || ev.mainLoop.handlers.length) {
+    panels.push(`<div class="panel"><h3>⚙️ Main process</h3>
+      <p class="sub">event-loop lag p50 <b>${ev.mainLoop.lagP50}ms</b> · p95 <b>${ev.mainLoop.lagP95}ms</b> · max <b>${ev.mainLoop.lagMax}ms</b></p>
+      ${ev.mainLoop.handlers.length ? `<h4>IPC handler timings</h4>${tbl(['Handler', 'Calls', 'Max', 'Total'], ev.mainLoop.handlers.map((h) => [esc(h.label), String(h.calls), h.maxMs + 'ms', h.totalMs + 'ms']))}` : ''}</div>`);
+  }
+
+  // CPU / memory
+  if (ev.cpuMem.processes.length) {
+    panels.push(`<div class="panel"><h3>🧠 CPU / memory</h3><p class="sub">peak per process</p>
+      ${tbl(['Process', 'Peak CPU', 'Peak memory'], ev.cpuMem.processes.map((p) => [esc(p.name), p.peakCpu + '%', p.peakMemMB + ' MB']))}</div>`);
+  }
+
+  // Errors
+  if (ev.errors.length) {
+    panels.push(`<div class="panel"><h3>🐛 JS errors <span class="big">${ev.errors.length}</span></h3>
+      <ul class="errlist">${ev.errors.map((e) => `<li><b>${esc(e.kind)}</b> <span class="lvl">${esc(e.where)}</span> ${esc(e.message)}${e.at ? `<br><code>${esc(e.at)}</code>` : ''}</li>`).join('')}</ul></div>`);
+  }
+
+  // Heartbeat
+  if (ev.heartbeat.jankCount > 0) {
+    panels.push(`<div class="panel"><h3>🫀 Renderer UI gaps <span class="big">${ev.heartbeat.jankCount}</span></h3>
+      <p class="sub">worst ${ev.heartbeat.worstMs}ms</p>
+      ${tbl(['Route', 'Gaps', 'Worst'], ev.heartbeat.routes.map((r) => [esc(r.route.length > 50 ? '…' + r.route.slice(-50) : r.route), String(r.count), r.worstMs + 'ms']))}</div>`);
+  }
+
+  // Storage writes — who wrote each key.
+  if (ev.storageOps.total > 0 || ev.storageOps.snapshotKeys > 0) {
+    panels.push(`<div class="panel"><h3>💾 Storage writes <span class="big">${ev.storageOps.total}</span></h3>
+      <p class="sub">${ev.storageOps.sets} set · ${ev.storageOps.removes} remove · ${ev.storageOps.clears} clear · left ${ev.storageOps.snapshotKeys} keys (${fmtMB(ev.storageOps.snapshotBytes / 1024)})</p>
+      ${ev.storageOps.byKey.length ? `<h4>By key — written by</h4>${tbl(['Key', 'Area', 'Writes', 'Bytes', 'Call-site'], ev.storageOps.byKey.map((k) => [esc(k.key), k.area, String(k.writes), String(k.bytes), `<code>${esc(k.at) || '—'}</code>`]))}` : ''}</div>`);
+  }
+
+  // Host — app-vs-host attribution.
+  if (ev.host) {
+    const h = ev.host;
+    const appShare = h.hostCpuPeak > 0 ? Math.round((h.appCpuPeak / h.hostCpuPeak) * 100) : 0;
+    panels.push(`<div class="panel"><h3>🖥️ Host</h3>
+      <p class="sub">${esc(h.cpuModel ?? 'unknown CPU')}${h.cores ? ` · ${h.cores} cores` : ''}${h.platform ? ` · ${h.platform}` : ''}</p>
+      ${tbl(['Metric', 'Value'], [
+        ['Host CPU peak', `${h.hostCpuPeak}% (avg ${h.hostCpuAvg}%)`],
+        ['↳ app processes peak', `${h.appCpuPeak}% — ${appShare >= 60 ? 'load is mostly the app' : 'much is external (possible confounder)'}`],
+        ['Free memory low', `${h.freeMemLowMB} MB`],
+        ['Peak load average', String(h.loadPeak)],
+      ])}</div>`);
+  }
+
+  if (panels.length) P.push(`<h2>Evidence by layer</h2><div class="panels">${panels.join('')}</div>`);
+
+  // Full-stream inventory (links to raw data).
+  if (ev.counts.length) {
+    P.push(`<h2>Full streams</h2><p class="streams">${ev.counts.map((c) => `<a href="${c.file}">${c.file}</a> <span>${c.count.toLocaleString()}</span>`).join(' · ')}</p>`);
+  }
+  return P.join('\n');
+}
+
 /** Read a run's evidence and write report.md + report.html. Returns verdict + exit code for CI. */
 export function buildReport(runDir: string, meta: ReportMeta): ReportResult {
   const rawFreezes = readJsonl<FreezeEvent>(join(runDir, 'freezes.jsonl'));
@@ -550,10 +756,25 @@ export function buildReport(runDir: string, meta: ReportMeta): ReportResult {
   // SAVE_BASELINE = record THIS run as the new baseline; BASELINE_TOLERANCE (default 1.2) = how much
   // worse than green counts as a regression.
   const tol = Number(process.env.BASELINE_TOLERANCE) || 1.2;
-  let baseline: Baseline | undefined;
+  let baseline: Baseline | undefined;   // old freeze-only baseline (back-compat with freeze-baseline.json)
+  let buildDiff: RunDiff | undefined;   // new per-step build comparison (build-baseline.json with .steps)
   const baselineFile = process.env.BASELINE_FILE;
   if (baselineFile && existsSync(baselineFile)) {
-    try { baseline = JSON.parse(readFileSync(baselineFile, 'utf8')) as Baseline; } catch { /* bad baseline → ignore, fall back to absolutes */ }
+    try {
+      const parsed = JSON.parse(readFileSync(baselineFile, 'utf8')) as Partial<RunSummary> & Partial<Baseline>;
+      if (Array.isArray(parsed.steps)) {
+        // New build-baseline → diff THIS run's per-step metrics against it (timing + freeze), and
+        // render the comparison inline in this run's own report.
+        const thisSteps = readRunSteps(runDir);
+        buildDiff = diffStepSets(parsed.steps as StepMetrics[], thisSteps, {
+          tolerance: tol, absMinMs: 50,
+          oldBuild: (parsed as RunSummary).build ?? { label: 'baseline' },
+          newBuild: { label: meta.appLabel, version: meta.appVersion },
+        });
+      } else if (parsed.byLayer) {
+        baseline = parsed as Baseline; // legacy freeze-only baseline
+      }
+    } catch { /* bad baseline → ignore, fall back to absolutes */ }
   }
   for (const inc of incidents) {
     if (baseline) { inc.vsBaseline = classifyVsBaseline(inc, baseline, tol); inc.baselineWorstMs = baseline.byLayer[primaryLayer(inc)]?.worstMs ?? 0; }
@@ -561,13 +782,20 @@ export function buildReport(runDir: string, meta: ReportMeta): ReportResult {
     inc.noise = isLikelyNoise(inc) || inc.vsBaseline === 'within';
   }
   if (process.env.SAVE_BASELINE) {
-    writeFileSync(process.env.SAVE_BASELINE, JSON.stringify(summarizeBaseline(incidents, meta.sessionEndIso), null, 2));
+    writeFileSync(process.env.SAVE_BASELINE, JSON.stringify(summarizeRun(runDir, meta.sessionEndIso, { label: meta.appLabel, version: meta.appVersion }), null, 2));
   }
   const baselineLabel = baseline
     ? `vs baseline (green ${baseline.createdIso.slice(0, 10)}, tolerance ${tol}×)`
+    : buildDiff ? `vs build ${buildDiff.oldBuild.label}${buildDiff.oldBuild.version ? ` v${buildDiff.oldBuild.version}` : ''} (tolerance ${tol}×)`
     : process.env.SAVE_BASELINE ? `recorded this run as the baseline → ${process.env.SAVE_BASELINE}` : undefined;
 
-  const { verdict, exitCode } = verdictOf(incidents, baseline);
+  let { verdict, exitCode } = verdictOf(incidents, baseline);
+  // Fold the build-diff verdict in: the run's verdict is the worse of the freeze verdict and the
+  // per-step build-regression verdict, so a timing regression with no freeze still gates CI.
+  if (buildDiff) {
+    const rank = { PASS: 0, CAUTION: 1, FAIL: 2 } as const;
+    if (rank[buildDiff.verdict] > rank[verdict]) { verdict = buildDiff.verdict; exitCode = buildDiff.exitCode; }
+  }
   const longest = incidents.reduce((a, i) => Math.max(a, i.durationMs), 0);
   const total = incidents.reduce((a, i) => a + i.durationMs, 0);
   const avg = incidents.length ? total / incidents.length : 0;
@@ -577,8 +805,15 @@ export function buildReport(runDir: string, meta: ReportMeta): ReportResult {
     trace: existsSync(join(runDir, 'trace.json')),
   };
   const layerFiles = renderLayerReports(runDir, correlated);
-  const md = renderMarkdown({ meta, incidents, verdict, longest, total, avg, rawFreezes, artifacts, layerFiles, baselineLabel });
-  const html = renderHtml({ meta, incidents, verdict, longest, total, artifacts, layerFiles, baselineLabel });
+  const steps = readRunSteps(runDir);
+  const evidence = readEvidenceSummary(runDir);
+  let md = renderMarkdown({ meta, incidents, verdict, longest, total, avg, rawFreezes, artifacts, layerFiles, baselineLabel, steps, evidence });
+  let html = renderHtml({ meta, incidents, verdict, longest, total, artifacts, layerFiles, baselineLabel, steps, evidence });
+  // Embed the build comparison inline (so the new build's own report shows what changed vs the old).
+  if (buildDiff) {
+    md += '\n\n---\n\n' + renderDiffMarkdown(buildDiff);
+    html = html.replace('<!--BUILDDIFF-->', diffSectionHtml(buildDiff));
+  }
 
   const base = `electron-freeze-report-${stamp(meta.sessionStartIso)}`;
   const mdPath = join(runDir, `${base}.md`);
@@ -596,22 +831,28 @@ function renderMarkdown(a: {
   meta: ReportMeta; incidents: Incident[]; verdict: ReportResult['verdict'];
   longest: number; total: number; avg: number; rawFreezes: FreezeEvent[];
   artifacts: { video: boolean; trace: boolean }; layerFiles: FreezeLayer[]; baselineLabel?: string;
+  steps: StepMetrics[]; evidence: EvidenceSummary;
 }): string {
   const { meta, incidents, verdict } = a;
   const start = new Date(meta.sessionStartIso), end = new Date(meta.sessionEndIso);
   const hasBaseline = !!a.baselineLabel && incidents.some((i) => i.vsBaseline);
   const L: string[] = [];
-  L.push('# Electron Freeze Watchdog — Sign-off Report', '');
+  L.push('# Electron Monitoring — Evidence Report', '');
+  L.push(`What **${meta.appLabel}**${meta.appVersion ? ` (v${meta.appVersion})` : ''} did across ${a.steps.length} step(s): full per-layer evidence + a freeze drill-down. Verdict gates CI.`, '');
   L.push('| Field | Value |', '|-------|-------|');
   L.push(`| Date | ${meta.sessionStartIso.slice(0, 10)} |`);
   L.push(`| Session | ${start.toTimeString().slice(0, 8)} → ${end.toTimeString().slice(0, 8)} (${fmtDur(end.getTime() - start.getTime())}) |`);
-  L.push(`| App | ${meta.appLabel} |`);
+  L.push(`| App | ${meta.appLabel}${meta.appVersion ? ` (v${meta.appVersion})` : ''} |`);
   L.push(`| Launch Mode | ${meta.launchMode}${meta.mainLayers ? '' : ' (main-process layers L3/L4/L5/L7 unavailable)'} |`);
   if (meta.hostUptimeSec != null) L.push(`| Host uptime | ${fmtUptime(meta.hostUptimeSec)} |`);
   L.push(`| Main-process layers | ${meta.mainLayers ? 'available' : 'unavailable (plain cdp — add --inspect)'} |`);
   L.push(`| Freeze Threshold | ${meta.thresholdMs}ms |`);
   L.push(`| Gate | ${a.baselineLabel ?? 'absolute thresholds (no baseline) — perception-anchored: ≥3s = FAIL'} |`);
   L.push(`| **Verdict** | **${VERDICT_EMOJI[verdict]} ${verdict}** |`, '');
+
+  // Lead with what the app DID — per-step trace + the rich per-layer evidence — then the freeze drill-down.
+  L.push(renderPerStepMarkdown(a.steps));
+  L.push(renderEvidenceMarkdown(a.evidence));
 
   // Soft environmental note: a long-up host can degrade (memory fragmentation, leaked fds, stale GPU
   // state) and make freezes that a fresh boot wouldn't. Context for triage, not a verdict change.
@@ -718,6 +959,7 @@ function renderMarkdown(a: {
 function renderHtml(a: {
   meta: ReportMeta; incidents: Incident[]; verdict: ReportResult['verdict'];
   longest: number; total: number; artifacts: { video: boolean; trace: boolean }; layerFiles: FreezeLayer[]; baselineLabel?: string;
+  steps: StepMetrics[]; evidence: EvidenceSummary;
 }): string {
   const { meta, incidents, verdict } = a;
   const sevClass = (s: Severity) => `sev-${s.toLowerCase()}`;
@@ -785,17 +1027,46 @@ function renderHtml(a: {
   ].filter(Boolean).join(' · ');
 
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Electron Freeze Report</title><style>
-  :root{--fg:#1f2937;--muted:#6b7280;--line:#e5e7eb;--bg:#f7f8fa;--card:#fff;
+<title>Electron Monitoring — Evidence Report</title><style>
+  :root{--fg:#1f2937;--muted:#6b7280;--line:#e5e7eb;--bg:#eef1f6;--card:#fff;
         --sev:#dc2626;--mod:#d97706;--min:#6b7280;--ok:#16a34a;--accent:#2563eb}
   *{box-sizing:border-box}
   body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:var(--bg);color:var(--fg);line-height:1.5}
-  .wrap{max-width:920px;margin:0 auto;padding:24px}
-  .banner{border-radius:12px;padding:18px 22px;color:#fff;margin-bottom:18px}
-  .banner h1{margin:0;font-size:1.35rem}.banner p{margin:.3rem 0 0;opacity:.95;font-size:.95rem}
-  .banner.PASS{background:var(--ok)}.banner.CAUTION{background:var(--mod)}.banner.FAIL{background:var(--sev)}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px}
+  .banner{border-radius:14px;padding:20px 24px;color:#fff;margin-bottom:18px;box-shadow:0 4px 16px rgba(0,0,0,.10)}
+  .banner h1{margin:0;font-size:1.4rem;letter-spacing:-.01em}.banner p{margin:.3rem 0 0;opacity:.95;font-size:.95rem}
+  .banner .tag{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;opacity:.85;font-weight:700;margin-bottom:4px;display:block}
+  .banner.PASS{background:linear-gradient(135deg,#16a34a,#15803d)}.banner.CAUTION{background:linear-gradient(135deg,#f59e0b,#d97706)}.banner.FAIL{background:linear-gradient(135deg,#ef4444,#b91c1c)}
   .meta{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:.85rem;color:var(--muted);margin-bottom:22px}
   .meta b{color:var(--fg);font-weight:600}
+  /* per-step lanes */
+  .lanes{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .lane{display:flex;align-items:center;gap:12px;padding:6px 4px;border-bottom:1px solid #f1f3f7}
+  .lane:last-child{border-bottom:none}
+  .lane-name{width:170px;flex:none;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.9rem}
+  .lane-track{flex:1;height:16px;background:#edf0f4;border-radius:8px;overflow:hidden;min-width:80px}
+  .lane-fill{display:block;height:100%;border-radius:8px}
+  .lane-fill.sev-severe{background:var(--sev)}.lane-fill.sev-moderate{background:var(--mod)}.lane-fill.sev-ok{background:#93c5a0}
+  .lane-dur{width:64px;flex:none;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;font-size:.85rem}
+  .lane-chips{width:300px;flex:none;text-align:right}
+  .dchip{display:inline-block;background:#eef2ff;color:#3730a3;border:1px solid #e0e7ff;border-radius:999px;padding:0 8px;font-size:.7rem;margin:1px 0 1px 4px}
+  .dchip.froze{background:#fef2f2;color:#b91c1c;border-color:#fecaca}
+  /* evidence panels */
+  .panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:0 1px 2px rgba(0,0,0,.04);overflow:hidden}
+  .panel h3{margin:0 0 4px;font-size:1rem;display:flex;align-items:baseline;gap:8px}
+  .panel h3 .big{font-size:1.5rem;font-weight:800;color:var(--accent)}
+  .panel h4{margin:12px 0 4px;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .panel .sub{margin:.1rem 0;font-size:.82rem;color:var(--muted)}
+  .panel table{width:100%;border-collapse:collapse;font-size:.78rem;margin-top:4px}
+  .panel th{text-align:left;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line);padding:3px 6px 3px 0;white-space:nowrap}
+  .panel td{padding:3px 6px 3px 0;border-bottom:1px solid #f4f6f9;vertical-align:top}
+  .panel td code{font-size:.72rem;word-break:break-all;background:#f3f4f6;padding:1px 4px;border-radius:4px}
+  .panel .errlist{margin:6px 0 0;padding-left:16px;font-size:.8rem}.panel .errlist li{margin-bottom:5px}
+  .streams{font-size:.85rem}.streams a{color:var(--accent);text-decoration:none;font-family:ui-monospace,Menlo,monospace}.streams span{color:var(--muted)}
+  .build-diff{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin-top:8px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .build-diff table{width:100%;border-collapse:collapse;font-size:.82rem;margin-top:8px}.build-diff th,.build-diff td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)}
+  .build-diff tr.reg{background:#fff7e6}.build-diff tr.sev{background:#fde7e7}.build-diff .notes{color:#888;font-size:.85em}.build-diff .verdict{font-size:.85rem;font-weight:700;margin-left:8px}
   .envnote{background:#fffbeb;border:1px solid #fde68a;border-left:4px solid var(--mod);color:#92400e;border-radius:10px;padding:10px 14px;margin:0 0 18px;font-size:.88rem}
   h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:26px 0 10px;border-bottom:1px solid var(--line);padding-bottom:6px}
   /* timeline */
@@ -844,11 +1115,12 @@ function renderHtml(a: {
   @media print{body{background:#fff}.tl-row:hover{background:none}.card{box-shadow:none}}
 </style></head><body><div class="wrap">
   <div class="banner ${verdict}">
-    <h1>${VERDICT_EMOJI[verdict]} ${verdict} — ${incidents.length === 0 ? 'no freezes detected' : `${incidents.length} freeze${incidents.length > 1 ? 's' : ''}, worst ${fmtS1(a.longest)}`}</h1>
-    <p>${incidents.length === 0 ? 'The app stayed responsive for the whole session.' : `Total time frozen: ${fmtS1(a.total)}. Tap a row or card to jump to the cause.`}</p>
+    <span class="tag">Electron Monitoring — Evidence Report</span>
+    <h1>${VERDICT_EMOJI[verdict]} ${verdict} — ${esc(meta.appLabel)}${meta.appVersion ? ` v${esc(meta.appVersion)}` : ''}</h1>
+    <p>${a.steps.length} step(s) traced · ${a.evidence.ipc.total.toLocaleString()} IPC messages · ${a.evidence.network.total} request(s) · ${incidents.length === 0 ? 'no freezes' : `${incidents.length} freeze${incidents.length > 1 ? 's' : ''} (worst ${fmtS1(a.longest)}, ${fmtS1(a.total)} total)`}</p>
   </div>
   <div class="meta">
-    <span><b>App:</b> ${esc(meta.appLabel)}</span>
+    <span><b>App:</b> ${esc(meta.appLabel)}${meta.appVersion ? ` v${esc(meta.appVersion)}` : ''}</span>
     <span><b>Mode:</b> ${esc(meta.launchMode)}${meta.mainLayers ? '' : ' (renderer only — add --inspect for main-process layers)'}</span>
     <span><b>When:</b> ${hhmmss(meta.sessionStartIso)}–${hhmmss(meta.sessionEndIso)}</span>
     <span><b>Threshold:</b> ${meta.thresholdMs}ms</span>
@@ -856,6 +1128,8 @@ function renderHtml(a: {
     ${meta.hostUptimeSec != null ? `<span><b>Host uptime:</b> ${fmtUptime(meta.hostUptimeSec)}</span>` : ''}
   </div>
   ${envNote}
+  ${renderEvidenceHtml(a.steps, a.evidence)}
+  <!--BUILDDIFF-->
   ${incidents.length === 0 ? '<div class="empty">🎉 Nothing froze. Nice.</div>' : `
   ${startHere}
   <h2>Timeline — which action froze, and for how long</h2>

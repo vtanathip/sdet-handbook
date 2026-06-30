@@ -85,34 +85,37 @@ export function run(): void {
   assert.ok(md2.indexOf('Start here') < md2.indexOf('Likely noise'), 'noise sorted below the real bug');
   assert.ok(existsSync(join(dir2, 'layers', 'main-loop.md')), 'per-layer detail report is written');
 
-  // Baseline: gate on REGRESSION vs a known-good run, not a static absolute. Record a green run
-  // (worst renderer-task = 2.0s), then a within-envelope run passes and a materially-worse run fails.
-  const gdir = mkdtempSync(join(tmpdir(), 'em-green-'));
+  // Build-vs-build baseline: record the OLD build's run as a build-baseline (per-step), then the NEW
+  // build's report loads it and embeds the comparison inline, gating on per-step TIMING regression
+  // (even with no freeze). Same scenario step 'load' run on both builds.
+  const gdir = mkdtempSync(join(tmpdir(), 'em-old-'));
   const gmeta = { sessionStartIso: iso(0), sessionEndIso: iso(5000), appLabel: './demo-app', launchMode: 'source', thresholdMs: 200, loafSupported: true, mainLayers: true };
-  const script = (ms: number, sev: string) =>
-    JSON.stringify({ layer: 'renderer-task', startIso: iso(150), durationMs: ms, severity: sev, detail: { kind: 'loaf', scripts: [{ sourceURL: 'app.js', functionName: 'render', charPos: 1, duration: ms }] } }) + '\n';
-  writeFileSync(join(gdir, 'freezes.jsonl'), script(2000, 'MODERATE'));
-  const baselinePath = join(gdir, 'baseline.json');
+  writeFileSync(join(gdir, 'actions.jsonl'), JSON.stringify({ name: 'load', startIso: iso(0), endIso: iso(1000) }) + '\n');
+  const baselinePath = join(gdir, 'build-baseline.json');
   try {
     process.env.SAVE_BASELINE = baselinePath;
     buildReport(gdir, gmeta);
     delete process.env.SAVE_BASELINE;
-    assert.ok(existsSync(baselinePath), 'a green run records baseline.json');
+    assert.ok(existsSync(baselinePath), 'the old build records build-baseline.json');
+    assert.ok(JSON.parse(readFileSync(baselinePath, 'utf8')).steps, 'build-baseline holds per-step metrics');
 
     process.env.BASELINE_FILE = baselinePath;
 
-    const wdir = mkdtempSync(join(tmpdir(), 'em-within-'));
-    writeFileSync(join(wdir, 'freezes.jsonl'), script(1900, 'MODERATE')); // ≤ 2.0s × 1.2 → within
-    const within = buildReport(wdir, gmeta);
-    assert.equal(within.incidents[0].vsBaseline, 'within', 'a 1.9s freeze is within the 2.0s baseline envelope');
-    assert.equal(within.verdict, 'PASS', 'within-baseline → PASS (no regression), even though absolute rules would CAUTION');
+    // New build: same step but 2.5× slower, no freeze → freeze verdict PASS, but the build diff cautions.
+    const ndir = mkdtempSync(join(tmpdir(), 'em-new-'));
+    writeFileSync(join(ndir, 'actions.jsonl'), JSON.stringify({ name: 'load', startIso: iso(0), endIso: iso(2500) }) + '\n');
+    const slower = buildReport(ndir, gmeta);
+    assert.equal(slower.verdict, 'CAUTION', 'a per-step timing regression gates CI even with no freeze');
+    const nmd = readFileSync(slower.mdPath, 'utf8');
+    assert.ok(nmd.includes('Build Comparison'), 'the new build report embeds the build comparison');
+    assert.ok(/load/.test(nmd) && nmd.includes('slower'), 'the slowed step is named as slower');
 
-    const bdir = mkdtempSync(join(tmpdir(), 'em-worse-'));
-    writeFileSync(join(bdir, 'freezes.jsonl'), script(5000, 'SEVERE')); // » 2.0s × 1.2 → worse
-    const worse = buildReport(bdir, gmeta);
-    assert.equal(worse.incidents[0].vsBaseline, 'worse', 'a 5s freeze is materially worse than baseline');
-    assert.equal(worse.verdict, 'FAIL', 'a regression (worse than green) + SEVERE → FAIL');
-    assert.ok(readFileSync(worse.mdPath, 'utf8').includes('Vs baseline'), 'report shows the baseline comparison');
+    // New build: same step within tolerance → no regression → PASS.
+    const cdir = mkdtempSync(join(tmpdir(), 'em-clean-'));
+    writeFileSync(join(cdir, 'actions.jsonl'), JSON.stringify({ name: 'load', startIso: iso(0), endIso: iso(1050) }) + '\n');
+    const clean = buildReport(cdir, gmeta);
+    assert.equal(clean.verdict, 'PASS', 'within-tolerance timing → PASS');
+    assert.ok(readFileSync(clean.mdPath, 'utf8').includes('Build Comparison'), 'report still shows the comparison section');
   } finally {
     delete process.env.SAVE_BASELINE;
     delete process.env.BASELINE_FILE;

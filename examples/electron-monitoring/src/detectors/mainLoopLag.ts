@@ -1,6 +1,8 @@
+import { join } from 'node:path';
 import { severityFor } from '../freezeBus.js';
 import type { Detector, DetectorCtx } from '../detector.js';
 import type { IpcTiming } from '../mainBridge.js';
+import { JsonlWriter } from '../util/jsonl.js';
 import { log } from '../util/logger.js';
 
 // L3 — main-process event-loop lag.
@@ -20,7 +22,10 @@ export class MainLoopLag implements Detector {
   private timer?: ReturnType<typeof setInterval>;
   private inflight = false;
   private timings: IpcTiming[] = [];
-  constructor(private readonly ctx: DetectorCtx) {}
+  private out: JsonlWriter;
+  constructor(private readonly ctx: DetectorCtx) {
+    this.out = new JsonlWriter(join(ctx.runDir, 'main-loop.jsonl'));
+  }
 
   async start(): Promise<void> {
     if (!this.ctx.mainBridge) { log('warn', '[L3] no main-process channel — skipping main-loop lag'); return; }
@@ -34,10 +39,17 @@ export class MainLoopLag implements Detector {
     this.inflight = true;
     try {
       // Keep a small rolling buffer of handler timings so a spike can be matched to a recent call.
-      this.timings.push(...await this.ctx.mainBridge.drainIpcHandlerTimings().catch(() => []));
+      const drained = await this.ctx.mainBridge.drainIpcHandlerTimings().catch(() => []);
+      this.timings.push(...drained);
       if (this.timings.length > 500) this.timings.splice(0, this.timings.length - 500);
 
       const maxMs = await this.ctx.mainBridge.readEventLoopLagMs();
+      // Full-capture: stream this interval's max lag + every handler invocation timing, so per-step
+      // main-process responsiveness is traceable (not only spikes over threshold).
+      if (this.ctx.config.captureAll) {
+        await this.out.append({ ts: new Date().toISOString(), kind: 'lag', maxLagMs: Math.round(maxMs) });
+        for (const t of drained) await this.out.append({ ts: new Date(t.ts).toISOString(), kind: 'handler', channel: t.channel, handlerKind: t.kind, durationMs: Math.round(t.durationMs) });
+      }
       if (maxMs > this.ctx.config.mainLoopMaxMs) {
         const durationMs = Math.round(maxMs);
         const now = Date.now();
@@ -72,5 +84,6 @@ export class MainLoopLag implements Detector {
     if (this.timer) clearInterval(this.timer);
     await this.poll();
     await this.ctx.mainBridge?.stopEventLoopMonitor().catch(() => {});
+    await this.out.close();
   }
 }

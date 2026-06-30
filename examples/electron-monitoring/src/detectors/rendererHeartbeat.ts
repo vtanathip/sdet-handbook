@@ -1,5 +1,7 @@
+import { join } from 'node:path';
 import { severityFor } from '../freezeBus.js';
 import type { Detector, DetectorCtx } from '../detector.js';
+import { JsonlWriter } from '../util/jsonl.js';
 import { log } from '../util/logger.js';
 
 // L1 — renderer UI-thread heartbeat.
@@ -27,6 +29,11 @@ function installHeartbeat(): void {
   const cores = navigator.hardwareConcurrency; // constant — capacity reframes severity (2-core CI box)
   let last = performance.now();
   let maxGap = 0;
+  // Full-capture: every jank gap ≥ JANK_FLOOR (one missed ~3-frame budget) since the last read, so the
+  // report can show per-step UI responsiveness — not just the single worst freeze.
+  // ponytail: 50ms floor keeps the stream to real jank; drop it via the harness if you want every frame.
+  const JANK_FLOOR = 50;
+  let gaps: { gapMs: number; at: number }[] = [];
   const tick = () => {
     const now = performance.now();
     // Ignore gaps while the window is hidden: background tabs/windows throttle timers, which would
@@ -34,6 +41,7 @@ function installHeartbeat(): void {
     if (document.visibilityState !== 'hidden') {
       const gap = now - last;
       if (gap > maxGap) maxGap = gap;
+      if (gap >= JANK_FLOOR && gaps.length < 4000) gaps.push({ gapMs: Math.round(gap), at: Date.now() });
     }
     last = now;
   };
@@ -41,13 +49,13 @@ function installHeartbeat(): void {
   const raf = () => { tick(); requestAnimationFrame(raf); };
   requestAnimationFrame(raf);
   // Read the cheap contextual envelope at recovery: WHICH screen froze + was it visible + capacity.
-  // All free reads — no new observers/wrappers. (ponytail: skipped an in-flight request counter; add
-  // a PerformanceObserver('resource') count when network-vs-CPU disambiguation is worth one.)
+  // All free reads — no new observers/wrappers.
   w.__hbRead = () => {
-    const m = maxGap;
-    maxGap = 0;
+    const m = maxGap; const g = gaps;
+    maxGap = 0; gaps = [];
     return {
       maxGap: m,
+      gaps: g,
       sinceLast: performance.now() - last,
       route: location.pathname + location.search + location.hash,
       visibility: document.visibilityState,
@@ -60,7 +68,10 @@ export class RendererHeartbeat implements Detector {
   readonly name = 'renderer-heartbeat';
   private timer?: ReturnType<typeof setInterval>;
   private inflight = false;
-  constructor(private readonly ctx: DetectorCtx) {}
+  private out: JsonlWriter;
+  constructor(private readonly ctx: DetectorCtx) {
+    this.out = new JsonlWriter(join(ctx.runDir, 'heartbeat.jsonl'));
+  }
 
   async start(): Promise<void> {
     await this.ctx.page.addInitScript(installHeartbeat);
@@ -75,6 +86,10 @@ export class RendererHeartbeat implements Detector {
       const r = (await this.ctx.page.evaluate(
         () => (window as unknown as { __hbRead?: () => HbSnapshot }).__hbRead?.() ?? { maxGap: 0 },
       )) as HbSnapshot;
+      // Full-capture: stream every jank gap (with route) so per-step UI responsiveness is traceable.
+      if (this.ctx.config.captureAll && r.gaps?.length) {
+        for (const g of r.gaps) await this.out.append({ ts: new Date(g.at).toISOString(), gapMs: g.gapMs, route: r.route, visibility: r.visibility });
+      }
       emitIfFrozen(r, this.ctx);
     } catch {
       /* page closed / navigating — ignore */
@@ -86,10 +101,11 @@ export class RendererHeartbeat implements Detector {
   async stop(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     await this.poll(); // final drain catches a freeze that ended just before teardown
+    await this.out.close();
   }
 }
 
-interface HbSnapshot { maxGap: number; sinceLast?: number; route?: string; visibility?: string; cores?: number }
+interface HbSnapshot { maxGap: number; gaps?: { gapMs: number; at: number }[]; sinceLast?: number; route?: string; visibility?: string; cores?: number }
 
 function emitIfFrozen(snap: HbSnapshot, ctx: DetectorCtx): void {
   if (snap.maxGap <= ctx.config.heartbeatMs) return;
